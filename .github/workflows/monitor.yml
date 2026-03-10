@@ -1,0 +1,35 @@
+name: BTC Quantile Monitor
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes, 24/7
+  workflow_dispatch:           # allow manual trigger from GitHub UI
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # needed to commit state.json back to repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run monitor
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
+        run: python monitor.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name  "btc-monitor"
+          git config user.email "monitor@noreply"
+          git add state.json
+          git diff --staged --quiet || git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
