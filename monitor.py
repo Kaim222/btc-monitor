@@ -124,11 +124,13 @@ def build_message(tier_name, sz, split_name, split_sz, btc_price, quantile):
         action = "Initiate" if scaling_in else cfg["action"]
         return f"{name}  <b>{action}</b>  Δ{cfg['delta']}  ·  {cfg['expiry']}"
 
-    primary_scaling_in = False
-    if split_name and split_sz > 0:
+    # At 100% no split = fully positioned = Initiate. Roll only when scaling out (split is riskier)
+    if not split_name or sz == 100:
+        primary_scaling_in = True
+    else:
         t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
         s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
-        primary_scaling_in = sz < 100 and s_qmin < t_qmin
+        primary_scaling_in = s_qmin < t_qmin
 
     short_rows = [r for r in [
         get_row(tier_name, sz, primary_scaling_in),
