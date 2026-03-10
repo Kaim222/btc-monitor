@@ -110,10 +110,10 @@ def build_message(tier_name, sz, split_name, split_sz, btc_price, quantile):
         t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
         s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
         split_is_riskier = s_qmin < t_qmin
-        lines.append(f"{tier_name:<16}  <b>{sz}%</b>{'  <i>scaling in</i>' if split_is_riskier else ''}")
-        lines.append(f"{split_name:<16}  <b>{split_sz}%</b>{'  <i>scaling out</i>' if split_is_riskier else '  <i>scaling in</i>'}")
+        lines.append(f"{tier_name}  <b>{sz}%</b>{'  <i>scaling in</i>' if split_is_riskier else ''}")
+        lines.append(f"{split_name}  <b>{split_sz}%</b>{'  <i>scaling out</i>' if split_is_riskier else '  <i>scaling in</i>'}")
     else:
-        lines.append(f"{tier_name:<16}  <b>{sz}%</b>")
+        lines.append(f"{tier_name}  <b>{sz}%</b>")
 
     # Short leg
     primary_scaling_in = False
@@ -131,7 +131,7 @@ def build_message(tier_name, sz, split_name, split_sz, btc_price, quantile):
         else:
             cfg = min(cfgs, key=lambda c: abs(c["size"] - alloc))
         action = "Initiate" if scaling_in else cfg["action"]
-        return f"{name:<14}  <b>{action}</b>  Δ{cfg['delta']}  ·  {cfg['expiry']}"
+        return f"{name}  <b>{action}</b>  Δ{cfg['delta']}  ·  {cfg['expiry']}"
 
     short_rows = []
     row = get_short_leg_row(tier_name, sz, primary_scaling_in)
