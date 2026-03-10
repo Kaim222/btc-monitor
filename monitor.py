@@ -99,58 +99,49 @@ def get_tier_and_size(q):
 # ── Notification builder ──────────────────────────────────────────────────────
 
 def build_message(tier_name, sz, split_name, split_sz, btc_price, quantile):
-    lines = []
-    price_str = f"Bitcoin ${btc_price:,.0f}"
-    q_str     = f"Quantile {quantile:.1f}%"
-    lines.append(f"{price_str}  ·  {q_str}")
-    lines.append("")
+    parts = []
 
-    lines.append("<b>Active Position</b>")
+    # Snapshot line
+    parts.append(f"Bitcoin ${btc_price:,.0f}  ·  Quantile {quantile:.1f}%")
+
+    # Active position block
+    pos = ["<b>Active Position</b>"]
     if split_name and split_sz > 0:
         t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
         s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
         split_is_riskier = s_qmin < t_qmin
-        lines.append(f"{tier_name}  <b>{sz}%</b>{'  <i>scaling in</i>' if split_is_riskier else ''}")
-        lines.append(f"{split_name}  <b>{split_sz}%</b>{'  <i>scaling out</i>' if split_is_riskier else '  <i>scaling in</i>'}")
+        pos.append(f"{tier_name}  <b>{sz}%</b>{'  <i>scaling in</i>' if split_is_riskier else ''}")
+        pos.append(f"{split_name}  <b>{split_sz}%</b>{'  <i>scaling out</i>' if split_is_riskier else '  <i>scaling in</i>'}")
     else:
-        lines.append(f"{tier_name}  <b>{sz}%</b>")
+        pos.append(f"{tier_name}  <b>{sz}%</b>")
+    parts.append("\n".join(pos))
 
-    # Short leg
+    # Short leg block
+    def get_row(name, alloc, scaling_in):
+        if name not in SHORT_LEG:
+            return None
+        cfg = SHORT_LEG[name][0] if scaling_in else min(SHORT_LEG[name], key=lambda c: abs(c["size"] - alloc))
+        action = "Initiate" if scaling_in else cfg["action"]
+        return f"{name}  <b>{action}</b>  Δ{cfg['delta']}  ·  {cfg['expiry']}"
+
     primary_scaling_in = False
     if split_name and split_sz > 0:
         t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
         s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
         primary_scaling_in = sz < 100 and s_qmin < t_qmin
 
-    def get_short_leg_row(name, alloc, scaling_in):
-        if name not in SHORT_LEG:
-            return None
-        cfgs = SHORT_LEG[name]
-        if scaling_in:
-            cfg = cfgs[0]
-        else:
-            cfg = min(cfgs, key=lambda c: abs(c["size"] - alloc))
-        action = "Initiate" if scaling_in else cfg["action"]
-        return f"{name}  <b>{action}</b>  Δ{cfg['delta']}  ·  {cfg['expiry']}"
-
-    short_rows = []
-    row = get_short_leg_row(tier_name, sz, primary_scaling_in)
-    if row:
-        short_rows.append(row)
-    if split_name and split_sz > 0:
-        t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
-        s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
-        split_in = s_qmin > t_qmin
-        row = get_short_leg_row(split_name, split_sz, split_in)
-        if row:
-            short_rows.append(row)
+    short_rows = [r for r in [
+        get_row(tier_name, sz, primary_scaling_in),
+        get_row(split_name, split_sz,
+                next((t["qMin"] for t in LADDER if t["name"] == split_name), 0) >
+                next((t["qMin"] for t in LADDER if t["name"] == tier_name), 0)
+               ) if split_name and split_sz > 0 else None
+    ] if r]
 
     if short_rows:
-        lines.append("")
-        lines.append("<b>Short Leg</b>")
-        lines.extend(short_rows)
+        parts.append("\n".join(["<b>Short Leg</b>"] + short_rows))
 
-    return "\n".join(lines)
+    return "\n\n".join(parts)
 
 # ── Pushover ──────────────────────────────────────────────────────────────────
 
