@@ -32,27 +32,27 @@ LADDER = [
 SHORT_LEG = {
     "IBIT Shares": [
         {"size":100,"delta":"0.15","expiry":"24+ mo","action":"Initiate"},
-        {"size":75, "delta":"0.30","expiry":"~12 mo","action":"Roll"},
-        {"size":50, "delta":"0.45","expiry":"~6 mo", "action":"Roll"},
-        {"size":25, "delta":"0.60","expiry":"~3 mo", "action":"Roll"},
+        {"size":75, "delta":"0.25","expiry":"~12 mo","action":"Roll"},
+        {"size":50, "delta":"0.35","expiry":"~6 mo", "action":"Roll"},
+        {"size":25, "delta":"0.45","expiry":"~3 mo", "action":"Roll"},
     ],
     "IBIT LEAPs": [
         {"size":100,"delta":"0.15","expiry":"24+ mo","action":"Initiate"},
-        {"size":75, "delta":"0.30","expiry":"~12 mo","action":"Roll"},
-        {"size":50, "delta":"0.45","expiry":"~6 mo", "action":"Roll"},
-        {"size":25, "delta":"0.60","expiry":"~3 mo", "action":"Roll"},
+        {"size":75, "delta":"0.25","expiry":"~12 mo","action":"Roll"},
+        {"size":50, "delta":"0.35","expiry":"~6 mo", "action":"Roll"},
+        {"size":25, "delta":"0.45","expiry":"~3 mo", "action":"Roll"},
     ],
     "MSTR LEAPs": [
         {"size":100,"delta":"0.15","expiry":"24+ mo","action":"Initiate"},
-        {"size":75, "delta":"0.30","expiry":"~12 mo","action":"Roll"},
-        {"size":50, "delta":"0.45","expiry":"~6 mo", "action":"Roll"},
-        {"size":25, "delta":"0.60","expiry":"~3 mo", "action":"Roll"},
+        {"size":75, "delta":"0.25","expiry":"~12 mo","action":"Roll"},
+        {"size":50, "delta":"0.35","expiry":"~6 mo", "action":"Roll"},
+        {"size":25, "delta":"0.45","expiry":"~3 mo", "action":"Roll"},
     ],
     "MSTX LEAPs": [
         {"size":100,"delta":"0.15","expiry":"24+ mo","action":"Initiate"},
-        {"size":75, "delta":"0.30","expiry":"~12 mo","action":"Roll"},
-        {"size":50, "delta":"0.45","expiry":"~6 mo", "action":"Roll"},
-        {"size":25, "delta":"0.60","expiry":"~3 mo", "action":"Roll"},
+        {"size":75, "delta":"0.25","expiry":"~12 mo","action":"Roll"},
+        {"size":50, "delta":"0.35","expiry":"~6 mo", "action":"Roll"},
+        {"size":25, "delta":"0.45","expiry":"~3 mo", "action":"Roll"},
     ],
 }
 
