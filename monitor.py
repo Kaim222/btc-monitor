@@ -110,9 +110,10 @@ def build_message(tier_name, sz, split_name, split_sz, btc_price, quantile):
         t_qmin = next(t["qMin"] for t in LADDER if t["name"] == tier_name)
         s_qmin = next(t["qMin"] for t in LADDER if t["name"] == split_name)
         split_is_riskier = s_qmin < t_qmin
-        # Primary (larger %) is always scaling in; split (smaller %) is always scaling out
-        pos.append(f"{tier_name}  <b>{sz}%</b>  <i>scaling in</i>")
-        pos.append(f"{split_name}  <b>{split_sz}%</b>  <i>scaling out</i>")
+        # split_is_riskier = BTC falling, accumulating risk → primary (safer) scaling in
+        # not split_is_riskier = BTC rising, reducing risk → primary (riskier) scaling out
+        pos.append(f"{tier_name}  <b>{sz}%</b>  <i>{'scaling in' if split_is_riskier else 'scaling out'}</i>")
+        pos.append(f"{split_name}  <b>{split_sz}%</b>  <i>{'scaling out' if split_is_riskier else 'scaling in'}</i>")
     else:
         pos.append(f"{tier_name}  <b>{sz}%</b>")
     parts.append("\n".join(pos))
