@@ -12,9 +12,9 @@ GENESIS_MS  = datetime.datetime(2009, 1, 3, tzinfo=datetime.timezone.utc).timest
 JV_A, JV_B  = 5.82, -17.029
 
 BAND_DEFS = [
-    { "q": 99.9, "m": -0.0000756204, "c":  0.849329 },
-    { "q": 95,   "m": -0.0000583518, "c":  0.683930 },
-    { "q": 85,   "m": -0.0000516698, "c":  0.473869 },
+    { "q": 99.9, "m": -0.0000756204, "c":  0.7434   },
+    { "q": 95,   "m": -0.0000583518, "c":  0.5943   },
+    { "q": 85,   "m": -0.0000516698, "c":  0.4318   },
     { "q": 50,   "m":  0,            "c": -0.000400  },
     { "q": 15,   "m":  0,            "c": -0.209200  },
     { "q": 0.1,  "m":  0,            "c": -0.340300  },
@@ -86,7 +86,9 @@ def price_to_quantile(price, ts_ms):
     return bands[-1]["q"] + slope * (res - bands[-1]["offset"])
 
 def get_tier_and_size(q):
-    idx = next((i for i, t in enumerate(LADDER) if t["qMin"] <= q < t["qMax"]), len(LADDER)-1)
+    idx = next((i for i, t in enumerate(LADDER) if t["qMin"] <= q < t["qMax"]), None)
+    if idx is None:
+        idx = 0 if q >= LADDER[0]["qMax"] else len(LADDER) - 1
     tier = LADDER[idx]
     pos  = max(0, min(0.9999, (q - tier["qMin"]) / (tier["qMax"] - tier["qMin"])))
     size = tier["sizes"][min(len(tier["sizes"])-1, int(pos * len(tier["sizes"])))]
