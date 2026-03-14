@@ -21,12 +21,12 @@ BAND_DEFS = [
 ]
 
 LADDER = [
-    { "name": "EPD",          "qMin": 95,  "qMax": 100, "sizes": [100]           },
-    { "name": "STRC",         "qMin": 80,  "qMax": 95,  "sizes": [100,75,50,25]  },
+    { "name": "EPD",          "qMin": 100, "qMax": 101, "sizes": [100]           },
+    { "name": "STRC",         "qMin": 80,  "qMax": 100, "sizes": [100,75,50,25]  },
     { "name": "IBIT Shares",  "qMin": 60,  "qMax": 80,  "sizes": [100,75,50,25]  },
-    { "name": "IBIT LEAPs",   "qMin": 35,  "qMax": 60,  "sizes": [100,75,50,25]  },
-    { "name": "MSTR LEAPs",   "qMin": 15,  "qMax": 35,  "sizes": [100,75,50,25]  },
-    { "name": "MSTX LEAPs",   "qMin": 0,   "qMax": 15,  "sizes": [100,75,50,25]  },
+    { "name": "IBIT LEAPs",   "qMin": 40,  "qMax": 60,  "sizes": [100,75,50,25]  },
+    { "name": "MSTR LEAPs",   "qMin": 20,  "qMax": 40,  "sizes": [100,75,50,25]  },
+    { "name": "MSTX LEAPs",   "qMin": 0,   "qMax": 20,  "sizes": [100,75,50,25]  },
 ]
 
 SHORT_LEG = {
