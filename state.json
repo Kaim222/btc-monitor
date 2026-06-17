@@ -1,8 +1,8 @@
 {
   "tier": "MSTX LEAPs",
-  "size": 75,
-  "split": "MSTR LEAPs",
-  "price": 65816.0,
-  "quantile": 5.32,
-  "updated": "2026-06-17T02:52:56.277872Z"
+  "size": 100,
+  "split": null,
+  "price": 65212.0,
+  "quantile": 4.85,
+  "updated": "2026-06-17T08:22:57.804668Z"
 }
