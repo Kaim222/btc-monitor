@@ -1,8 +1,6 @@
 {
-  "tier": "MSTX LEAPs",
-  "size": 50,
-  "split": "MSTR LEAPs",
-  "price": 77625.0,
-  "quantile": 10.52,
-  "updated": "2026-08-21T17:11:19.958352Z"
+  "band": "MSTX PMCC",
+  "price": 77410.0,
+  "quantile": 10.38,
+  "updated": "2026-08-21T17:19:35.656097+00:00"
 }
