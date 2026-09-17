@@ -68,12 +68,13 @@ cheapFire = gap <= cheapT and session.ismarket
 richFire  = gap >= richT and session.ismarket
 buyBar    = lagFire and not lagFire[1]
 
-plot(projHere, "Projected price", color=color.new(color.aqua, 0), style=plot.style_circles, linewidth=1)
-plot(lag, "Lag (%)", color=color.new(color.aqua, 0), display=display.none)   // hidden; feeds the alert text as plot_1
+plot(close, "Price", color=color.new(color.orange, 0), linewidth=2)                                   // solid orange: this chart's price
+plot(projHere, "Projected price", color=color.new(color.aqua, 0), style=plot.style_circles, linewidth=2)  // dotted aqua: the projection
+plot(lag, "Lag (%)", color=color.new(color.aqua, 0), display=display.none)   // hidden; feeds the alert text as plot_2
 bgcolor(cheapFire ? color.new(color.green, 92) : richFire ? color.new(color.red, 94) : na)
 plotshape(buyBar, "Buy", shape.labelup, location.belowbar, color=color.new(color.aqua, 0), text="BUY", textcolor=color.black, size=size.small)
 
-alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its window, BTC holding. Window: the next hour.")
+alertcondition(lagFire, "Lag", "MSTR lag {{plot_2}}% vs its window, BTC holding. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "Price is under the cheap line. Swing signal.")
 alertcondition(richFire, "Rich", "Price is over the rich line.")
 
