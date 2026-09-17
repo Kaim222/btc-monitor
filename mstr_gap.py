@@ -188,13 +188,9 @@ def main():
     g = float(r["gap"])
     if g <= CHEAP and level_due("cheap", g, lambda now, last: now <= last - 0.01):
         rule = "BTC is trending up or sideways: in the backtest this is the state where the gap closed with MSTR rising." if regime == "above" else "BTC is below its 50-day: the weaker state in the backtest (two to four episodes). Size smaller or wait for BTC to turn."
-        send_pushover("Cheap %+.1f%%" % (100 * g), core + "
-
-" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
+        send_pushover("Cheap %+.1f%%" % (100 * g), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
     if g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01):
-        send_pushover("Rich %+.1f%%" % (100 * g), core + "
-
-Rich readings faded about 2% vs BTC over five days in the backtest.", sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+        send_pushover("Rich %+.1f%%" % (100 * g), core + "\n\nRich readings faded about 2% vs BTC over five days in the backtest.", sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
     if fired:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
