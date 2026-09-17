@@ -12,6 +12,9 @@ Three alerts:
   CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
          point further, and hourly while it holds. Carries BTC's 50-day state as context (not a gate).
   RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence.
+  BAND   the ladder band on the monthly close (Kaim power-law quantile: under 15 MSTX, 15 to 50 MSTR, 50 to 85 IBIT, 85 and up
+         the sell zone), pushed when a month's close moves it. The 50-day crossing, Cheap and Rich pushes carry the ladder plays
+         (the site's data/ladder-rules.json is the written version).
   Every alert leads with MSTX vs projected MSTX (yesterday's close moved 2x MSTR's projected move), then MSTR.
   Regime gate (config regime_gate, default on): Lag and Cheap push only with BTC above its 50-day; Rich only below. Muted alerts are still logged and scored.
 
@@ -24,7 +27,7 @@ Regular session only (9:35 to 16:00 New York). Env: PUSHOVER_TOKEN, PUSHOVER_USE
 sending. Flags: --force (run outside market hours on the last session's bars), --test (send one test message).
 """
 import os, sys, json, math, urllib.request, urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import pandas as pd, yfinance as yf
 
@@ -95,6 +98,34 @@ def strc_rule(s):
     return max(0.775, 0.775 + (s - 77.5) * 0.005)
 def target(strc, btc): return strc_rule(strc) + SLOPE * (btc - 75000) / 2500
 
+# The ladder: Kaim power law (A 5.82, B -17.029 on days since 2009-01-03) and its quantile bands, the same constants as the site.
+_GEN = datetime(2009, 1, 3, tzinfo=timezone.utc)
+_BANDS = [(99.9, -0.0000756204, 0.7434), (95, -0.0000583518, 0.5943), (85, -0.0000516698, 0.4318), (50, 0, -0.0004), (15, 0, -0.2092), (0.1, 0, -0.3403)]
+def _days(ts):
+    if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+    return (ts - _GEN).total_seconds() / 86400
+def _band_offsets(ts):
+    d, today = _days(ts), _days(datetime.now(timezone.utc))
+    return [(q, m * (min(d, today) if m < 0 else d) + c) for q, m, c in _BANDS]    # the upper bands decay, capped at today
+def fair_value(ts): return 10 ** (5.82 * math.log10(_days(ts)) - 17.029)
+def ladder_q(price, ts):
+    res, bs = math.log10(price / fair_value(ts)), _band_offsets(ts)
+    for (hq, ho), (lq, lo) in zip(bs, bs[1:]):
+        if lo <= res <= ho: return lq + (res - lo) / (ho - lo) * (hq - lq)
+    if res > bs[0][1]: return min(99.99, bs[0][0] + (res - bs[0][1]) * (bs[0][0] - bs[1][0]) / (bs[0][1] - bs[1][1]))
+    return max(0.01, bs[-1][0] + (res - bs[-1][1]) * (bs[-2][0] - bs[-1][0]) / (bs[-2][1] - bs[-1][1]))
+def ladder_price(q, ts):
+    bs = _band_offsets(ts)
+    for (hq, ho), (lq, lo) in zip(bs, bs[1:]):
+        if lq <= q <= hq: return fair_value(ts) * 10 ** (lo + (q - lq) / (hq - lq) * (ho - lo))
+    return float("nan")
+def ladder_band(q): return "MSTX" if q < 15 else "MSTR" if q < 50 else "IBIT" if q < 85 else "sell zone"
+BAND_LINE = {"MSTX": 15, "MSTR": 50, "IBIT": 85}          # the band ceiling, where the short goes and the rotation triggers
+BAND_PLAY = {"MSTX": "MSTX PMCC: long 12 months at 0.75 delta, short 90 days at the 15 line, rolled.",
+             "MSTR": "MSTR PMCC: long 12 months at 0.75 delta, short 90 days at the 50 line, rolled.",
+             "IBIT": "IBIT PMCC: long 12 months at 0.75 delta, short 90 days at the 85 line, rolled. Rich readings here are the sell.",
+             "sell zone": "Sell the BTC beta into it and rotate down; the proceeds sit in STRC."}
+
 def send_pushover(title, message, sound="cashregister"):
     token, user = os.environ.get("PUSHOVER_TOKEN"), os.environ.get("PUSHOVER_USER")
     if not token or not user:
@@ -148,16 +179,40 @@ def main():
             HOLD_SRC, "auto" if "override" not in HOLD_SRC else "manual", format(int(BTC_HELD), ","), SHARES_M, cfg["_source"], SLOPE, 100 * LAG, 100 * CHEAP, 100 * RICH))
         with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
         return
-    # BTC vs its 50-day: checked on every run, in or out of the session, and pushed when it crosses
-    btc_daily = yf.Ticker("BTC-USD").history(period="80d")["Close"].dropna()
-    btc50 = float(btc_daily.tail(50).mean()); btc_now = float(btc_daily.iloc[-1])
-    regime_now = "above" if btc_now > btc50 else "below"
+    # BTC's daily close vs its 50-day, and the ladder band on the monthly close: checked on every run, in or out of the session, pushed on a change.
+    # Completed UTC days only (the rule is the daily close, so the crossing fires once, on the first run after the close, never on a wick).
+    btc_daily = yf.Ticker("BTC-USD").history(period="130d")["Close"].dropna()
+    utc_now = datetime.now(timezone.utc); tz = btc_daily.index.tz
+    done = btc_daily[btc_daily.index < pd.Timestamp(utc_now.year, utc_now.month, utc_now.day, tz=tz)]
+    btc50 = float(done.tail(50).mean()); btc_close = float(done.iloc[-1])
+    regime_now = "above" if btc_close > btc50 else "below"
+    # the band: the prior month's last daily close, run through the ladder at the month-end instant; a touch on the daily is not a rotation
+    m0 = pd.Timestamp(utc_now.year, utc_now.month, 1, tz=tz); mclose = btc_daily[btc_daily.index < m0]
+    if len(mclose) and (m0 - mclose.index[-1]) <= pd.Timedelta(days=1):
+        m_end, m_px = (m0 - pd.Timedelta(milliseconds=1)).to_pydatetime(), float(mclose.iloc[-1])
+        q_m = ladder_q(m_px, m_end); band_now = ladder_band(q_m); prev_band = state.get("band")
+        if prev_band and band_now != prev_band:
+            line = BAND_LINE.get(band_now)
+            line_px = ladder_price(line, utc_now + timedelta(days=90)) if line else float("nan")
+            msg = ("The <b>%s</b> monthly close, $%s, is ladder quantile <b>%.1f</b>: the band moved from %s to <b>%s</b>.\n<b>Play:</b> %s%s\n"
+                   "A monthly close crossed a band line: exit or rotate the primary into the new band's structure; the gate and the entry rules apply to the new long. Gate: BTC's close is %s its 50-day." % (
+                   m_end.strftime("%b %Y"), format(round(m_px), ","), q_m, prev_band, band_now, BAND_PLAY[band_now],
+                   (" The %d line in 90 days is BTC $%s; the WHAT IF box on the MSTX tab converts it." % (line, format(round(line_px), ","))) if line else "",
+                   regime_now))
+            send_pushover("Ladder band: %s" % band_now, msg, sound="bike")
+            state["band_changed"] = now.isoformat()
+        state["band"], state["band_q"], state["band_close"] = band_now, round(q_m, 1), m_end.strftime("%Y-%m-%d")
+        with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)      # saved now, so a later fetch failure cannot repeat the push
+    btc_now = btc_close
     prev_regime = state.get("regime")
     if prev_regime in ("above", "below") and regime_now != prev_regime:
+        band_txt = state.get("band") or "unknown"
         if regime_now == "above":
-            msg = "BTC $%s crossed <b>above</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are on; Rich is muted.\n<b>Play:</b> cheap swings and lag day trades are allowed again." % (format(round(btc_now), ","), format(round(btc50), ","))
+            msg = ("BTC's daily close, $%s, is <b>above</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are on; Rich is muted.\n<b>Play:</b> long structures are allowed again. "
+                   "Band on the monthly close: <b>%s</b>. %s Cheap swings and lag day trades are on." % (format(round(btc_now), ","), format(round(btc50), ","), band_txt, BAND_PLAY.get(band_txt, "")))
         else:
-            msg = "BTC $%s crossed <b>below</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are muted; Rich is on.\n<b>Play:</b> close any open Cheap swing today. No new longs on the gap until BTC is back above." % (format(round(btc_now), ","), format(round(btc50), ","))
+            msg = ("BTC's daily close, $%s, is <b>below</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are muted; Rich is on.\n<b>Play:</b> no new money. "
+                   "Roll the short call down and closer (30 to 45 days), keep the long. Close any open Cheap swing today." % (format(round(btc_now), ","), format(round(btc50), ",")))
         send_pushover("BTC %s its 50-day" % regime_now, msg, sound="bike")
         state["regime"] = regime_now; state["regime_changed"] = now.isoformat()
         with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
@@ -189,7 +244,7 @@ def main():
     df["gap_x"] = df["MSTX"] / df["proj_x"] - 1
     r = df.iloc[-1]; t = df.index[-1]
     btc_hour = btc_last / float(df["BTC"].iloc[max(0, len(df) - 61)]) - 1
-    regime = "above" if btc_last > btc50 else "below"
+    regime = regime_now                                                       # the daily-close gate, the same one the crossing push uses
     mnav = r["MSTR"] / (btc_last * BPS)
     print("%s  MSTR %.2f  BTC %s  STRC %.2f  mNAV %.3f  target %.3f  projected %.2f  gap %+.2f%%  lag %s  BTC 1h %+.2f%%  BTC %s its 50-day  (inputs: %s)" % (
         t.strftime("%Y-%m-%d %H:%M"), r["MSTR"], format(round(btc_last), ","), strc, mnav, r["target"], r["proj"], 100 * r["gap"],
@@ -197,8 +252,10 @@ def main():
     core = ("MSTX <b>$%.2f</b> vs projected <b>$%.2f</b> (gap <b>%+.1f%%</b>)\n"
             "MSTR $%.2f vs projected $%.2f (gap %+.1f%%, lag %s)\n"
             "BTC $%s (%+.1f%% last hour) · STRC $%.2f · mNAV %.3f vs target %.3f\n"
-            "BTC is %s its 50-day ($%s) · holdings %s") % (r["MSTX"], r["proj_x"], 100 * r["gap_x"], r["MSTR"], r["proj"], 100 * r["gap"],
-            ("%+.1f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC)
+            "BTC is %s its 50-day ($%s) · holdings %s\n"
+            "Ladder: <b>%s</b> band on the monthly close (%sq) · live %.1fq") % (r["MSTX"], r["proj_x"], 100 * r["gap_x"], r["MSTR"], r["proj"], 100 * r["gap"],
+            ("%+.1f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC,
+            state.get("band", "unknown"), state.get("band_q", "?"), ladder_q(btc_last, datetime.now(timezone.utc)))
     today = str(last_day); fired = []
     def record(kind, muted=False):
         ledger.append({"kind": kind, "muted": muted, "time": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last, 2), "proj": round(float(r["proj"]), 2),
@@ -223,13 +280,14 @@ def main():
     if g <= CHEAP and level_due("cheap", g, lambda now, last: now <= last - 0.01) and GATE and regime != "above":
         state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; record("cheap", muted=True); print("cheap muted: BTC below its 50-day")
     elif g <= CHEAP and level_due("cheap", g, lambda now, last: now <= last - 0.01):
-        rule = ("<b>CHEAP, swing trade.</b> BTC is above its 50-day, the state where cheap closed with MSTR rising (+5.9% MSTR over 5 days in the backtest).\n<b>Play:</b> weekly call vertical from the swing sleeve: long just below the price, short at the projected price.\n<b>Exit:</b> when the gap closes to zero, or after 5 trading days, or the day BTC closes under its 50-day, whichever first."
+        rule = ("<b>CHEAP, swing trade.</b> BTC is above its 50-day, the state where cheap closed with MSTR rising (+5.9% MSTR over 5 days in the backtest).\n<b>Play:</b> weekly call vertical from the swing sleeve: long just below the price, short at the projected price.\n<b>Exit:</b> when the gap closes to zero, or after 5 trading days, or the day BTC closes under its 50-day, whichever first." + ("\n<b>Primary:</b> the band is the sell zone; no new primary." if state.get("band") == "sell zone" else
+                        "\n<b>Primary:</b> if this phase's primary is not on yet, Cheap is its entry day, at the phase's share of the sleeve: Phase 2 is the Jan/Dec diagonal at 70%; from Phase 3 it is the band's structure, long 12 months at 0.75 delta, short 90 days at the band ceiling.")
                 if regime == "above" else "<b>CHEAP, but BTC is below its 50-day.</b> The weaker state in the backtest; the gate is off, so this is context only.")
         send_pushover("Cheap %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
     if g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01) and GATE and regime != "below":
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01):
-        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is below its 50-day. Rich readings faded about 2% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days.", sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % regime, sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
     if fired:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
