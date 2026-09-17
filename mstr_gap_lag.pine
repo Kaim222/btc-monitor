@@ -47,7 +47,7 @@ lag     = (ratio / ratioAv - 1) * 100
 btcMove = (btc / btc[winBars] - 1) * 100
 
 // the window must not reach back across the overnight gap: arm only once the session has a full window of bars
-sinceOpen = ta.barssince(session.isfirstbar)
+sinceOpen = ta.barssince(session.isfirstbar_regular)   // regular-session open even when extended hours are shown
 warm      = not na(sinceOpen) and sinceOpen >= winBars
 
 lagFire   = warm and lag <= lagT and btcMove >= btcHold and session.ismarket
