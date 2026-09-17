@@ -8,7 +8,7 @@ indicator("MSTX projected (Kaim)", shorttitle="MSTX proj", overlay=true)
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
-slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)
 lev       = input.float(2.0, "Fund leverage (MSTX = 2)", step=0.5)
 lagT      = input.float(-2.5, "Lag alert, MSTX % vs the trailing window", step=0.5)
 cheapT    = input.float(-6.0, "Cheap line, MSTX % under projection", step=0.5)

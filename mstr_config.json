@@ -1,12 +1,12 @@
 {
   "btc_held": "auto",
   "shares_m": "auto",
-  "btc_slope_per_2500": 0.0125,
+  "btc_slope_per_2500": 0.025,
   "lag_threshold": -0.015,
   "cheap_threshold": -0.03,
   "rich_threshold": 0.04,
   "btc_hour_move_floor": -0.01,
+  "regime_gate": false,
   "updated": "2026-09-17",
-  "note": "Holdings and ADSO come live from api.strategy.com on the tab and in the gap monitor. Put a number in btc_held or shares_m only to override. Slope 0.0125 is the measured mNAV beta to BTC. cheap_threshold -0.03 = MSTR 3% under projection (about 6% on MSTX), the swing line; lag_threshold -0.015 = the minute-scale lag alert. regime_gate true = Lag and Cheap alerts only with BTC above its 50-day, Rich only below; muted alerts are still logged.",
-  "regime_gate": true
+  "note": "Holdings and ADSO come live from api.strategy.com on the tab and in the gap monitor. Put a number in btc_held or shares_m only to override. Slope 0.025 per $2,500 is Alex's sheet; it matches the last three months' measured mNAV beta to BTC (0.81). The two-year number, 0.0125, was dominated by the 2025-26 de-rating. cheap_threshold -0.03 = MSTR 3% under projection (about 6% on MSTX), the swing line; lag_threshold -0.015 = the minute-scale lag alert. regime_gate false per the 9/17 call: the 50-day is context, not a gate. Set it true to mute Lag and Cheap unless BTC is above its 50-day; muted alerts are still logged."
 }
