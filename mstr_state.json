@@ -2,7 +2,20 @@
   "strategy_last": {
     "btc_held": 845050.0,
     "shares_m": 450.112,
-    "as_of": 1789613361318,
-    "fetched": "2026-09-16T22:49:34.361409-04:00"
-  }
+    "as_of": 1789620877802,
+    "fetched": "2026-09-17T00:54:55.400419-04:00"
+  },
+  "last_run": "2026-09-17T00:54:55.400490-04:00",
+  "last_bar": "2026-09-16T15:59:00-04:00",
+  "mstr": 126.31,
+  "btc": 76010,
+  "strc": 97.07,
+  "gap": -1.73,
+  "lag": 0.73,
+  "regime": "above",
+  "fired": [],
+  "inputs": "ladder site",
+  "holdings": "strategy.com live",
+  "btc_held": 845050.0,
+  "shares_m": 450.112
 }
