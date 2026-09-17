@@ -56,7 +56,8 @@ if session.isfirstbar_regular
 avSince = cntR > 0 ? sumR / cntR : na                         // average of the bars since the open, before this bar
 sumR := sumR + ratio
 cntR := cntR + 1
-ratioAv = cntR - 1 >= winBars ? ta.sma(ratio[1], winBars) : avSince
+smaR    = ta.sma(ratio[1], winBars)                            // computed every bar so its history is consistent
+ratioAv = cntR - 1 >= winBars ? smaR : avSince
 lag     = na(ratioAv) ? na : (ratio / ratioAv - 1) * 100
 btcBack = math.min(winBars, math.max(1, cntR - 1))
 btcMove = (btc / btc[btcBack] - 1) * 100
