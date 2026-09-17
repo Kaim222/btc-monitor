@@ -94,7 +94,7 @@ def main():
     now = datetime.now(NY)
     state, ledger = load(STATE_FILE, {}), load(LEDGER_FILE, [])
     if TEST:
-        send_pushover("MSTR gap monitor: test", "Wired. Inputs from the %s: BTC held %s, shares %.3fM, slope %.4f per $2,500. Alerts: lag %.1f%% inside an hour, cheap %.0f%%, rich +%.0f%%." % (
+        send_pushover("Test", "Wired. Inputs from the %s: BTC held %s, shares %.3fM, slope %.4f per $2,500. Alerts: lag %.1f%% inside an hour, cheap %.0f%%, rich +%.0f%%." % (
             cfg["_source"], format(int(BTC_HELD), ","), SHARES_M, SLOPE, 100 * LAG, 100 * CHEAP, 100 * RICH)); return
     in_session = now.weekday() < 5 and (now.hour, now.minute) >= (9, 35) and (now.hour, now.minute) <= (16, 0)
     if not in_session and not FORCE:
@@ -131,16 +131,16 @@ def main():
     last_lag = state.get("last_lag_alert")
     cool = last_lag and (t - datetime.fromisoformat(last_lag)) < timedelta(minutes=60)
     if not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool:
-        send_pushover("MSTR lag %+.1f%% inside the hour, BTC holding" % (100 * r["lag"]),
+        send_pushover("Lag %+.1f%%" % (100 * r["lag"]),
                       core + "\n\nMSTR fell <b>%.1f%%</b> against the projection over the last hour while BTC held. In the backtest these closed within 30 to 60 minutes. Window: the next hour." % (100 * r["lag"]), sound="siren")
         state["last_lag_alert"] = t.isoformat(); fired.append("lag"); record("lag")
     # CHEAP, once a day
     if r["gap"] <= CHEAP and state.get("last_cheap_day") != today:
         rule = "BTC is trending up or sideways: the daily backtest says this is when the gap closes with MSTR rising." if regime == "above" else "BTC is below its 50-day: the daily backtest says the gap tends to close by BTC falling. Not a buy signal on its own."
-        send_pushover("MSTR cheap %+.1f%% vs projected" % (100 * r["gap"]), core + "\n\n" + rule); state["last_cheap_day"] = today; fired.append("cheap"); record("cheap")
+        send_pushover("Cheap %+.1f%%" % (100 * r["gap"]), core + "\n\n" + rule); state["last_cheap_day"] = today; fired.append("cheap"); record("cheap")
     # RICH, once a day
     if r["gap"] >= RICH and state.get("last_rich_day") != today:
-        send_pushover("MSTR rich %+.1f%% vs projected" % (100 * r["gap"]), core + "\n\nRich readings faded about 2% vs BTC over five days in the backtest.", sound="pushover"); state["last_rich_day"] = today; fired.append("rich"); record("rich")
+        send_pushover("Rich %+.1f%%" % (100 * r["gap"]), core + "\n\nRich readings faded about 2% vs BTC over five days in the backtest.", sound="pushover"); state["last_rich_day"] = today; fired.append("rich"); record("rich")
     if fired:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
