@@ -80,15 +80,17 @@ armed   = cnt - 1 >= minBars and session.ismarket
 lagFire   = armed and not na(lag) and lag <= lagT and btcMove >= btcHold
 cheapFire = gap <= cheapT and session.ismarket
 richFire  = gap >= richT and session.ismarket
-buyBar    = lagFire and not lagFire[1] and (not useGate or btcUp)
-sellBar   = richFire and not richFire[1] and (not useGate or not btcUp)
+swingBuy  = cheapFire and not cheapFire[1] and (not useGate or btcUp)        // level: crossed under the cheap line, BTC trending up
+swingSell = richFire and not richFire[1] and (not useGate or not btcUp)      // level: crossed over the rich line, BTC trending down
+lagBuy    = lagFire and not lagFire[1] and (not useGate or btcUp)            // speed: the day-trade lag (intraday charts only)
 
 plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
 plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
 plot(gap, "Gap (MSTX %)", color=color.new(color.orange, 0), display=display.none)    // hidden; shows in the legend
 plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none)      // hidden; shows in the legend, feeds the alert text as plot_3
-plot(buyBar ? close : na, "Buy", color=color.new(color.lime, 0), style=plot.style_cross, linewidth=4)    // green + on the line
-plot(sellBar ? close : na, "Sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=4)    // red + on the line
+plot(swingBuy ? close : na, "Swing buy", color=color.new(color.lime, 0), style=plot.style_cross, linewidth=4)     // green + on the line
+plot(swingSell ? close : na, "Swing sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=4)    // red + on the line
+plot(lagBuy ? close : na, "Lag (day trade)", color=color.new(color.aqua, 0), style=plot.style_circles, linewidth=3)   // aqua dot on the line
 
 alertcondition(lagFire and (not useGate or btcUp), "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
 alertcondition(cheapFire and (not useGate or btcUp), "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
