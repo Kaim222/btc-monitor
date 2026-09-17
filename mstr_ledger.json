@@ -1,1 +1,40 @@
-[]
+[
+  {
+    "kind": "watch",
+    "muted": false,
+    "time": "2026-09-17T11:02:00-04:00",
+    "mstr": 129.12,
+    "btc": 76323.85,
+    "proj": 130.86,
+    "gap": -1.33,
+    "lag": -1.18,
+    "regime": "above",
+    "mstx": 13.52,
+    "proj_mstx": 13.88,
+    "gap_mstx": -2.62,
+    "mstr_30m": -0.04,
+    "mstx_30m": -0.07,
+    "mstr_60m": 1.05,
+    "mstx_60m": 2.89,
+    "note": "backfilled 9/17: the monitor was misconfigured all day and logged nothing"
+  },
+  {
+    "kind": "lag",
+    "muted": false,
+    "time": "2026-09-17T11:13:00-04:00",
+    "mstr": 128.21,
+    "btc": 76248.2,
+    "proj": 130.62,
+    "gap": -1.84,
+    "lag": -1.52,
+    "regime": "above",
+    "mstx": 13.34,
+    "proj_mstx": 13.83,
+    "gap_mstx": -3.58,
+    "mstr_30m": 1.26,
+    "mstx_30m": 3.61,
+    "mstr_60m": 1.65,
+    "mstx_60m": 4.13,
+    "note": "backfilled 9/17: the monitor was misconfigured all day and logged nothing"
+  }
+]

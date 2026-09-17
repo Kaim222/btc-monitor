@@ -5,11 +5,12 @@ Projected MSTR = BTC x (BTC held / shares) x target mNAV, target = STRC rule + s
 gap = MSTR / projected - 1.
 
 Three alerts:
-  LAG    the gap falls past lag_threshold (config, -1.25% MSTR = -2.5% MSTX) below its own average over the previous
-         hour while BTC has held (BTC's own hour move better than -1%), measured at MSTR's bar LOW, which is where
+  LAG    the gap falls past lag_threshold (config, -1.5% MSTR = -3.0% MSTX) below its own average over the previous
+         hour while BTC has held. The lag uses its OWN slope (config lag_slope 0.0125), not the projected price's 0.025:
+         0.0125 at a -3.0% MSTX line was the best hit rate tested (17 events in 60 days, 65% positive). Alex's call 9/17 (BTC's own hour move better than -1%), measured at MSTR's bar LOW, which is where
          mstx_projected.pine measures it. Every bar since the previous run is scanned and the deepest one is judged, so
          a lag that lives in one minute is not missed by a five-minute poll. Cooldown 60 minutes. Readings past
-         lag_watch (-0.75% MSTR) are written to the ledger without a push, so near misses are on the record.
+         lag_watch (-1.0% MSTR = -2.0% MSTX) are written to the ledger without a push, so near misses are on the record.
          These three settings were wrong until 2026-09-17: the threshold was -1.5% MSTR, the measure was the close, and
          only the newest bar was judged. Alex took a lag trade at 11:13 that day and no push ever went out.
   CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
@@ -82,6 +83,7 @@ def sync_pine(held, shares_m):
     subs = [(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held))),
             (r'input\.float\([0-9.]+, "Assumed diluted shares \(M\)"', 'input.float(%.3f, "Assumed diluted shares (M)"' % shares_m),
             (r'input\.float\([0-9.]+, "Target mNAV slope per \$2,500 of BTC"', 'input.float(%s, "Target mNAV slope per $2,500 of BTC"' % ("%g" % SLOPE)),
+            (r'input\.float\([0-9.]+, "Lag slope per \$2,500 of BTC \(the lag runs on its own\)"', 'input.float(%s, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % ("%g" % LAG_SLOPE)),
             (r'input\.float\(-?[0-9.]+, "Lag alert, MSTX % vs the trailing window"', 'input.float(%g, "Lag alert, MSTX %% vs the trailing window"' % (100 * LAG_X)),
             (r'input\.float\(-?[0-9.]+, "Cheap line, MSTX % under projection"', 'input.float(%g, "Cheap line, MSTX %% under projection"' % (100 * CHEAP_X)),
             (r'input\.float\(-?[0-9.]+, "Rich line, MSTX % over projection"', 'input.float(%g, "Rich line, MSTX %% over projection"' % (100 * RICH_X))]
@@ -97,12 +99,13 @@ if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_
 if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
 BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
 SLOPE = float(cfg.get("btc_slope_per_2500", 0.025))            # fallbacks mirror the live config; a failed fetch must not change the rules
-LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.0125)), float(cfg.get("cheap_threshold", -0.03)), float(cfg.get("rich_threshold", 0.04))
+LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.03)), float(cfg.get("rich_threshold", 0.04))
 LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * CHEAP, 2 * RICH   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
 BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
 GATE = bool(cfg.get("regime_gate", True))     # Lag and Cheap push only with BTC above its 50-day; Rich only below. Muted ones are still logged.
+LAG_SLOPE = float(cfg.get("lag_slope", 0.0125))         # the lag has its own slope; the projected price uses SLOPE
 LAG_AT_LOW = bool(cfg.get("lag_at_low", True))          # measure the lag at MSTR's bar low, where the indicator measures it
-LAG_WATCH = float(cfg.get("lag_watch", -0.0075))        # log a row at this depth even when nothing fires, so near misses are on the record
+LAG_WATCH = float(cfg.get("lag_watch", -0.01))        # log a row at this depth even when nothing fires, so near misses are on the record
 BPS = BTC_HELD / (SHARES_M * 1e6)
 
 def strc_rule(s):
@@ -112,7 +115,7 @@ def strc_rule(s):
     if s >= 87.5: return 0.825 + (s - 87.5) * 0.005
     if s >= 82.5: return 0.80 + (s - 82.5) * 0.005
     return max(0.775, 0.775 + (s - 77.5) * 0.005)
-def target(strc, btc): return strc_rule(strc) + SLOPE * (btc - 75000) / 2500
+def target(strc, btc, slope=None): return strc_rule(strc) + (SLOPE if slope is None else slope) * (btc - 75000) / 2500
 
 # The ladder: Kaim power law (A 5.82, B -17.029 on days since 2009-01-03) and its quantile bands, the same constants as the site.
 _GEN = datetime(2009, 1, 3, tzinfo=timezone.utc)
@@ -257,15 +260,23 @@ def main():
     btc_last = float(df["BTC"].iloc[-1])
     df["target"] = [target(strc, b) for b in df["BTC"]]
     df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
-    df["hour_avg"] = df["gap"].shift(1).rolling(60, min_periods=30).mean()
+    # The LAG runs on its OWN slope (config lag_slope 0.0125), not the slope the projected price uses (0.025). They are
+    # different jobs: the projection is a level and wants the slope matching measured mNAV beta; the lag is a minute-scale
+    # deviation from its own trailing average and separates better at the lower slope. On 60 days of 5-minute bars,
+    # 0.0125 at a -3.0% MSTX line gave 17 events, 65% positive, median MSTX +0.49% and median MSTR-minus-BTC +0.28%, the
+    # best hit rate of any slope/threshold pair tested. Alex's call, 9/17. Cheap and Rich still read the 0.025 gap.
+    df["tgt_lag"] = [target(strc, b, LAG_SLOPE) for b in df["BTC"]]
+    df["proj_lag"] = BPS * df["BTC"] * df["tgt_lag"]
+    df["gap_lag"] = df["MSTR"] / df["proj_lag"] - 1
     # the lag is measured at MSTR's bar LOW, the same place mstx_projected.pine measures it. Measuring at the close
     # hid a real signal on 9/17: the chart printed its orange plus at 11:13 to 11:16 and the close-based reading never
     # reached the line. gap_lo is the same gap computed off the bar's low.
-    df["gap_lo"] = df["MSTRLO"] / df["proj"] - 1
+    df["gap_lo"] = df["MSTRLO"] / df["proj_lag"] - 1
+    df["hour_avg"] = df["gap_lag"].shift(1).rolling(60, min_periods=30).mean()
     # Divide by the trailing average, do not subtract from it. Pine computes lev x (ratioLo / avR - 1); subtracting the
     # two gaps drops the denominator and reads differently whenever the gap is far from zero (1% off at a 1% gap, 10%
     # off at a 10% gap). Written this way the two tools agree at every level.
-    df["lag"] = ((df["gap_lo"] if LAG_AT_LOW else df["gap"]) - df["hour_avg"]) / (1 + df["hour_avg"])
+    df["lag"] = ((df["gap_lo"] if LAG_AT_LOW else df["gap_lag"]) - df["hour_avg"]) / (1 + df["hour_avg"])
     df["proj_x"] = mstx_prev * (1 + 2.0 * (df["proj"] / mstr_prev - 1))     # projected MSTX: yesterday's close moved 2x MSTR's projected move
     df["gap_x"] = df["MSTX"] / df["proj_x"] - 1
     r = df.iloc[-1]; t = df.index[-1]

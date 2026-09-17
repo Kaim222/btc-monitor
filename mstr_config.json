@@ -2,13 +2,14 @@
   "btc_held": "auto",
   "shares_m": "auto",
   "btc_slope_per_2500": 0.025,
-  "lag_threshold": -0.0125,
+  "lag_threshold": -0.015,
   "cheap_threshold": -0.03,
   "rich_threshold": 0.04,
   "btc_hour_move_floor": -0.01,
   "regime_gate": true,
   "updated": "2026-09-17",
-  "note": "One file for the MSTX tab, the gap monitor and the TradingView indicator. Holdings and ADSO come live from api.strategy.com (btc_held / shares_m 'auto'; put a number in to override). Slope 0.025 per $2,500 is Alex's sheet and matches the last three months' measured mNAV beta to BTC (0.81). cheap_threshold -0.03 = MSTR 3% under projection (6% on MSTX); rich_threshold 0.04 (8% on MSTX). lag_threshold -0.0125 = 2.5% on MSTX, the same number mstx_projected.pine has always used; it was -0.015 (3% MSTX) until 9/17, which is why the chart printed an orange plus at 11:13 and no push went out. lag_at_low true = measure the lag at MSTR's bar low, where the indicator measures it, not at the close. lag_watch -0.0075 = log a ledger row at this depth even when nothing fires, so near misses are on the record and the threshold can be decided from data instead of memory. regime_gate true = Lag and Cheap only with BTC above its 50-day, Rich only below; muted alerts are still logged. The monitor's hardcoded fallbacks now mirror these values, so a failed fetch cannot silently restore an older rule. The Cheap and Rich tests run on the MSTX gap against twice these MSTR numbers, which is the quantity the indicator draws its lines on. sync_pine writes the slope and all three thresholds into the .pine files as well as the holdings, so a re-pasted chart carries them; before 9/17 it synced only the holdings and the indicator sat at slope 0.0125 against this file's 0.025.",
+  "note": "One file for the MSTX tab, the gap monitor and the TradingView indicator. Holdings and ADSO come live from api.strategy.com. btc_slope_per_2500 0.025 is Alex's sheet and matches the last three months' measured mNAV beta (0.81); it sets the projected price and therefore Cheap and Rich. lag_slope 0.0125 is DELIBERATELY different: the lag is a minute-scale deviation from its own trailing average, a different job from pricing a level, and it separates better at the lower slope. On 60 days of 5-minute bars at the bar low, distinct events 60+ minutes apart, 0.0125 at a -3.0% MSTX line gave 17 events (2.0/week), 65% positive at 60 minutes, median MSTX +0.49% and median MSTR-minus-BTC +0.28% -- the best hit rate of any slope and threshold pair tested. 0.025 at -3.0% was 13 events and 62% positive with a negative median on the market-neutral measure. Alex's call, 9/17. On 19 days of 1-minute bars the three slopes are statistically indistinguishable (10 to 15 events), so the 5-minute window is what this rests on. lag_threshold -0.015 = -3.0% MSTX, measured at MSTR's bar low (lag_at_low). lag_watch -0.01 = -2.0% MSTX, logged to the ledger without a push so the shallow zone keeps accumulating evidence. cheap_threshold -0.03 and rich_threshold 0.04 are MSTR terms; the Cheap and Rich tests run on the MSTX gap at twice these. regime_gate true.",
   "lag_at_low": true,
-  "lag_watch": -0.0075
+  "lag_watch": -0.01,
+  "lag_slope": 0.0125
 }

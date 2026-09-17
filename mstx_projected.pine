@@ -10,9 +10,10 @@ btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
 slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)   // matches data/mstr-config.json; 0.0125 was the two-year number
 lev       = input.float(2.0, "Fund leverage (MSTX = 2)", step=0.5)
-lagT      = input.float(-2.5, "Lag alert, MSTX % vs the trailing window", step=0.5)
-cheapT    = input.float(-6, "Cheap line, MSTX % under projection", step=0.5)
-richT     = input.float(8, "Rich line, MSTX % over projection", step=0.5)
+lagSlope  = input.float(0.0125, "Lag slope per $2,500 of BTC (the lag runs on its own)", step=0.0025)
+lagT      = input.float(-3.0, "Lag alert, MSTX % vs the trailing window", step=0.5)
+cheapT    = input.float(-6.0, "Cheap line, MSTX % under projection", step=0.5)
+richT     = input.float(8.0, "Rich line, MSTX % over projection", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 minMins   = input.int(20, "Minutes after the open before the lag can fire", minval=5)
@@ -65,7 +66,8 @@ gap    = (close / projX - 1) * 100                                // MSTX vs pro
 // The window is in minutes so it means the same on 1, 5 and 15 minute charts. In the first hour it averages the bars since the open.
 winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
 minBars = math.max(1, math.round(minMins * 60 / timeframe.in_seconds()))
-ratio   = mstrI / (btc * target)                                  // MSTR over what it should track; holdings cancel
+tgtLag  = strcRule(strc) + lagSlope * (btc - 75000) / 2500       // the lag has its own slope; the projected line keeps slope
+ratio   = mstrI / (btc * tgtLag)                                  // MSTR over what it should track; holdings cancel
 var float sumR = 0.0
 var int   cnt  = 0
 if session.isfirstbar_regular
@@ -76,7 +78,7 @@ sumR := sumR + ratio
 cnt  := cnt + 1
 smaR  = ta.sma(ratio[1], winBars)
 avR   = cnt - 1 >= winBars ? smaR : avSince
-ratioLo = mstrLo / (btc * target)                                 // the worst point inside the bar
+ratioLo = mstrLo / (btc * tgtLag)                                 // the worst point inside the bar
 lag   = na(avR) ? na : lev * (ratioLo / avR - 1) * 100           // MSTR's lag at the bar's low, in MSTX terms (x leverage), so it reads the same on any timeframe
 back  = math.min(winBars, math.max(1, cnt - 1))
 btcMove = (btc / btc[back] - 1) * 100
