@@ -155,13 +155,9 @@ def main():
     prev_regime = state.get("regime")
     if prev_regime in ("above", "below") and regime_now != prev_regime:
         if regime_now == "above":
-            msg = "BTC $%s crossed <b>above</b> its 50-day ($%s).
-<b>Gate:</b> Lag and Cheap alerts are on; Rich is muted.
-<b>Play:</b> cheap swings and lag day trades are allowed again." % (format(round(btc_now), ","), format(round(btc50), ","))
+            msg = "BTC $%s crossed <b>above</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are on; Rich is muted.\n<b>Play:</b> cheap swings and lag day trades are allowed again." % (format(round(btc_now), ","), format(round(btc50), ","))
         else:
-            msg = "BTC $%s crossed <b>below</b> its 50-day ($%s).
-<b>Gate:</b> Lag and Cheap alerts are muted; Rich is on.
-<b>Play:</b> close any open Cheap swing today. No new longs on the gap until BTC is back above." % (format(round(btc_now), ","), format(round(btc50), ","))
+            msg = "BTC $%s crossed <b>below</b> its 50-day ($%s).\n<b>Gate:</b> Lag and Cheap alerts are muted; Rich is on.\n<b>Play:</b> close any open Cheap swing today. No new longs on the gap until BTC is back above." % (format(round(btc_now), ","), format(round(btc50), ","))
         send_pushover("BTC %s its 50-day" % regime_now, msg, sound="bike")
         state["regime"] = regime_now; state["regime_changed"] = now.isoformat()
         with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
