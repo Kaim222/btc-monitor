@@ -8,7 +8,7 @@ indicator("MSTX Projection", shorttitle="MSTX Projection", overlay=true, max_lin
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
-slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)   // matches data/mstr-config.json; 0.0125 was the two-year number
 lev       = input.float(2.0, "Fund leverage (MSTX = 2)", step=0.5)
 lagT      = input.float(-2.5, "Lag alert, MSTX % vs the trailing window", step=0.5)
 cheapT    = input.float(-6.0, "Cheap line, MSTX % under projection", step=0.5)
@@ -25,8 +25,11 @@ strcSym   = input.symbol("BATS:STRC", "STRC symbol")
 strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
 
 btc      = request.security(btcSym, timeframe.period, close)
-btcMa50  = request.security(btcSym, "D", ta.sma(close, 50))        // BTC's 50-day average, computed on daily bars
-btcUp    = btc > btcMa50
+// The gate is BTC's last COMPLETED daily close against the 50-day average of completed closes, which is what the
+// monitor uses. Reading the live price against a live SMA let the chart open the gate while the push stayed muted.
+btcClose = request.security(btcSym, "D", close[1], lookahead=barmerge.lookahead_off)
+btcMa50  = request.security(btcSym, "D", ta.sma(close, 50)[1], lookahead=barmerge.lookahead_off)
+btcUp    = btcClose > btcMa50
 mstrI    = request.security(mstrSym, timeframe.period, close)   // MSTR on this chart's bars
 mstrLo   = request.security(mstrSym, timeframe.period, low)     // MSTR's low inside each bar
 strcI    = request.security(strcSym, timeframe.period, close)   // STRC on this chart's bars

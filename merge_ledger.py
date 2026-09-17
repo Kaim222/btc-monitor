@@ -19,15 +19,30 @@ def load(path):
         return []
 
 def merge(remote, ours):
-    seen, out = set(), []
+    """Union on (kind, time), field-merging rather than picking a winner.
+
+    Taking the first row seen discarded scoring. score_ledger fills mstr_30m / mstx_30m / mstr_60m / mstx_60m into a row
+    minutes after it was written, so the two sides of a race are usually the SAME event at different stages: one scored,
+    one not. Whichever arrives first would win and the scores would be lost, quietly, forever. Fields are merged instead,
+    and a value that is already filled in is never overwritten with a null.
+    """
+    by_key = {}
+    order = []
     for row in list(remote) + list(ours):
         if not isinstance(row, dict):
             continue
         key = (row.get("kind"), row.get("time"))
-        if key in seen:
+        if key not in by_key:
+            by_key[key] = dict(row)
+            order.append(key)
             continue
-        seen.add(key)
-        out.append(row)
+        merged = by_key[key]
+        for k, v in row.items():
+            if v is None:
+                continue
+            if merged.get(k) is None or k not in merged:
+                merged[k] = v
+    out = [by_key[k] for k in order]
     out.sort(key=lambda r: str(r.get("time") or ""))
     return out
 
