@@ -15,7 +15,8 @@ Three alerts:
          only the newest bar was judged. Alex took a lag trade at 11:13 that day and no push ever went out.
   CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
          point further, and hourly while it holds. Carries BTC's 50-day state as context (not a gate).
-  RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence.
+  RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence. NOT gated (rich_gate false since 9/17):
+         it declined with BTC both above and below its 50-day, and it measures the premium that triggers MSTR's ATM issuance.
   BAND   the ladder band on the monthly close (Kaim power-law quantile: under 15 MSTX, 15 to 50 MSTR, 50 to 85 IBIT, 85 and up
          the sell zone), pushed when a month's close moves it. The 50-day crossing, Cheap and Rich pushes carry the ladder plays
          (the site's data/ladder-rules.json is the written version).
@@ -102,7 +103,8 @@ SLOPE = float(cfg.get("btc_slope_per_2500", 0.025))            # fallbacks mirro
 LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.03)), float(cfg.get("rich_threshold", 0.04))
 LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * CHEAP, 2 * RICH   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
 BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
-GATE = bool(cfg.get("regime_gate", True))     # Lag and Cheap push only with BTC above its 50-day; Rich only below. Muted ones are still logged.
+GATE = bool(cfg.get("regime_gate", True))          # LAG and CHEAP only: the buy signals want BTC above its 50-day
+RICH_GATE = bool(cfg.get("rich_gate", False))      # Rich fires in either regime; it declined in both on the daily data
 LAG_SLOPE = float(cfg.get("lag_slope", 0.0125))         # the lag has its own slope; the projected price uses SLOPE
 LAG_AT_LOW = bool(cfg.get("lag_at_low", True))          # measure the lag at MSTR's bar low, where the indicator measures it
 LAG_WATCH = float(cfg.get("lag_watch", -0.01))        # log a row at this depth even when nothing fires, so near misses are on the record
@@ -348,7 +350,7 @@ def main():
                         "\n<b>Primary:</b> if this phase's primary is not on yet, Cheap is its entry day, at the phase's share of the sleeve: Phase 2 is the Jan/Dec diagonal at 70%; from Phase 3 it is the band's structure, long 12 months at 0.75 delta, short 90 days at the band ceiling.")
                 if regime == "above" else "<b>CHEAP, but BTC is below its 50-day.</b> The weaker state in the backtest; the gate is off, so this is context only.")
         send_pushover("Cheap %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
-    if g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01) and GATE and regime != "below":
+    if g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01) and RICH_GATE and regime != "below":
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01):
         send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % regime, sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
