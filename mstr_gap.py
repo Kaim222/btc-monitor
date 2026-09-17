@@ -9,15 +9,16 @@ Three alerts:
          (BTC's own hour move better than -1%). In words: MSTR just dropped about 1.5% against the projection inside
          an hour and BTC did not. The minute-scale backtest (Jul-Sep 2026) shows these closing within 30 to 60 minutes.
          Cooldown 60 minutes.
-  CHEAP  the gap itself is -4% or worse: MSTR is 4% under the projected price. Once a day. Carries BTC's 50-day regime,
-         because the daily backtest says buy only when BTC is trending up or sideways.
-  RICH   the gap is +4% or better. Once a day, informational.
+  CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
+         point further, and hourly while it holds. Carries BTC's 50-day state as context (not a gate).
+  RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence.
+  Every alert leads with MSTX vs projected MSTX (yesterday's close moved 2x MSTR's projected move), then MSTR.
 
 Holdings and the assumed diluted share count come from api.strategy.com/btc/bitcoinKpis on every run (btcHoldings and
 satsPerShare; this reproduces strategy.com/shares' ADSO exactly), so Monday's 8-K flows through by itself. Thresholds and the
 slope come from the ladder site's data/mstr-config.json (fetched live from GitHub; editing that file changes both the site and
 this monitor); set btc_held or shares_m there only to override the API. A local mstr_config.json is the fallback. State in mstr_state.json. Every alert is scored on later
-runs (MSTR minus BTC over the next 30 and 60 minutes) into mstr_ledger.json, so the rule keeps a record of itself.
+runs (MSTR minus BTC, and MSTX itself, over the next 30 and 60 minutes) into mstr_ledger.json, so the rule keeps a record of itself.
 Regular session only (9:35 to 16:00 New York). Env: PUSHOVER_TOKEN, PUSHOVER_USER; without them it prints instead of
 sending. Flags: --force (run outside market hours on the last session's bars), --test (send one test message).
 """
@@ -75,12 +76,6 @@ def sync_pine(held, shares_m):
         if new != src:
             open(pf, "w", encoding="utf-8").write(new); changed = True
     return changed
-if _h and _s and "override" not in HOLD_SRC:
-    changed = sync_pine(_h, _s)
-    moved = _prev and (abs(float(_prev.get("btc_held", 0)) - _h) >= 1 or abs(float(_prev.get("shares_m", 0)) - _s) >= 0.001)
-    if moved:
-        send_pushover("Holdings changed", "Strategy now shows <b>%s BTC</b> over <b>%.3fM</b> assumed diluted shares (was %s / %.3fM). The site and this monitor already use the new numbers. Re-paste the TradingView indicator: its defaults are updated in the monitor repo (mstr_gap_lag.pine)." % (
-            format(int(_h), ","), _s, format(int(float(_prev.get("btc_held", 0))), ","), float(_prev.get("shares_m", 0))), sound="magic")
 if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_held"]), "config override"
 if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
 BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
@@ -107,6 +102,14 @@ def send_pushover(title, message, sound="cashregister"):
     with urllib.request.urlopen(req, timeout=10) as r: result = json.loads(r.read())
     if result.get("status") != 1: raise RuntimeError("Pushover error: %s" % result)
     print("Pushover sent: " + title)
+
+# the Monday check: needs send_pushover, so it lives below it
+if _h and _s and "override" not in HOLD_SRC:
+    changed = sync_pine(_h, _s)
+    moved = _prev and (abs(float(_prev.get("btc_held", 0)) - _h) >= 1 or abs(float(_prev.get("shares_m", 0)) - _s) >= 0.001)
+    if moved:
+        send_pushover("Holdings changed", "Strategy now shows <b>%s BTC</b> over <b>%.3fM</b> assumed diluted shares (was %s / %.3fM). The site and this monitor already use the new numbers. Type the two numbers into the TradingView indicator's settings (or re-paste mstx_projected.pine from the monitor repo, its defaults are updated)." % (
+            format(int(_h), ","), _s, format(int(float(_prev.get("btc_held", 0))), ","), float(_prev.get("shares_m", 0))), sound="magic")
 
 def bars(ticker, interval="1m", period="2d"):   # BTC "1d" is the UTC day and goes empty after 8 PM New York, so two days
     h = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
