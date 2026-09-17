@@ -1,11 +1,11 @@
 {
-  "btc_held": 845050,
-  "shares_m": 450.112,
+  "btc_held": "auto",
+  "shares_m": "auto",
   "btc_slope_per_2500": 0.0125,
   "lag_threshold": -0.015,
   "cheap_threshold": -0.04,
   "rich_threshold": 0.04,
   "btc_hour_move_floor": -0.01,
   "updated": "2026-09-16",
-  "note": "One file for the MSTR tab and the gap monitor. Update btc_held and shares_m after each Monday 8-K. Slope 0.0125 is the measured mNAV beta to BTC; the sheet uses 0.025."
+  "note": "Holdings and the assumed diluted share count (ADSO) come live from api.strategy.com on the tab and in the gap monitor, so Monday's 8-K flows through by itself. Put a number in btc_held or shares_m only to override that. Slope 0.0125 is the measured mNAV beta to BTC; the sheet uses 0.025."
 }

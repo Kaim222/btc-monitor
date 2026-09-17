@@ -13,8 +13,10 @@ Three alerts:
          because the daily backtest says buy only when BTC is trending up or sideways.
   RICH   the gap is +4% or better. Once a day, informational.
 
-Inputs come from the ladder site's data/mstr-config.json (fetched live from GitHub, so editing that file changes both the
-site and this monitor); a local mstr_config.json is the fallback. State in mstr_state.json. Every alert is scored on later
+Holdings and the assumed diluted share count come from api.strategy.com/btc/bitcoinKpis on every run (btcHoldings and
+satsPerShare; this reproduces strategy.com/shares' ADSO exactly), so Monday's 8-K flows through by itself. Thresholds and the
+slope come from the ladder site's data/mstr-config.json (fetched live from GitHub; editing that file changes both the site and
+this monitor); set btc_held or shares_m there only to override the API. A local mstr_config.json is the fallback. State in mstr_state.json. Every alert is scored on later
 runs (MSTR minus BTC over the next 30 and 60 minutes) into mstr_ledger.json, so the rule keeps a record of itself.
 Regular session only (9:35 to 16:00 New York). Env: PUSHOVER_TOKEN, PUSHOVER_USER; without them it prints instead of
 sending. Flags: --force (run outside market hours on the last session's bars), --test (send one test message).
@@ -41,7 +43,27 @@ def load_config():
         print("config from the ladder site failed (%s); using the local file" % e)
         cfg = load(CONFIG_FILE, {}); cfg["_source"] = "local"; return cfg
 cfg = load_config()
-BTC_HELD = float(cfg.get("btc_held", 845050)); SHARES_M = float(cfg.get("shares_m", 450.112))
+STRATEGY_API = "https://api.strategy.com/btc/bitcoinKpis"
+def strategy_holdings(state):
+    """(btc_held, shares_m, as_of, source). Live from strategy.com; else the last good values in state; else the config."""
+    try:
+        req = urllib.request.Request(STRATEGY_API, headers={"User-Agent": "Mozilla/5.0 mstr-gap-monitor"})
+        with urllib.request.urlopen(req, timeout=10) as r: k = json.loads(r.read())["results"]
+        held = float(str(k["btcHoldings"]).replace(",", "")); sps = float(k["satsPerShare"])
+        shares_m = held / (sps / 1e8) / 1e6
+        if held > 100000 and 100 < shares_m < 5000:
+            state["strategy_last"] = {"btc_held": held, "shares_m": round(shares_m, 3), "as_of": k.get("msTimestamp"), "fetched": datetime.now(NY).isoformat()}
+            return held, shares_m, "strategy.com live"
+    except Exception as e:
+        print("strategy.com holdings failed (%s)" % e)
+    s = state.get("strategy_last")
+    if s: return float(s["btc_held"]), float(s["shares_m"]), "strategy.com cached %s" % s.get("fetched", "")[:16]
+    return None, None, "none"
+_state0 = load(STATE_FILE, {})
+_h, _s, HOLD_SRC = strategy_holdings(_state0)
+if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_held"]), "config override"
+if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
+BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
 SLOPE = float(cfg.get("btc_slope_per_2500", 0.0125))
 LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.04)), float(cfg.get("rich_threshold", 0.04))
 BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
@@ -93,9 +115,12 @@ def score_ledger(df, ledger):
 def main():
     now = datetime.now(NY)
     state, ledger = load(STATE_FILE, {}), load(LEDGER_FILE, [])
+    if _state0.get("strategy_last"): state["strategy_last"] = _state0["strategy_last"]
     if TEST:
-        send_pushover("Test", "Wired. Inputs from the %s: BTC held %s, shares %.3fM, slope %.4f per $2,500. Alerts: lag %.1f%% inside an hour, cheap %.0f%%, rich +%.0f%%." % (
-            cfg["_source"], format(int(BTC_HELD), ","), SHARES_M, SLOPE, 100 * LAG, 100 * CHEAP, 100 * RICH)); return
+        send_pushover("Test", "Wired. Holdings %s (%s): BTC held %s, shares %.3fM. Thresholds from the %s: slope %.4f per $2,500, lag %.1f%% inside an hour, cheap %.0f%%, rich +%.0f%%." % (
+            HOLD_SRC, "auto" if "override" not in HOLD_SRC else "manual", format(int(BTC_HELD), ","), SHARES_M, cfg["_source"], SLOPE, 100 * LAG, 100 * CHEAP, 100 * RICH))
+        with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
+        return
     in_session = now.weekday() < 5 and (now.hour, now.minute) >= (9, 35) and (now.hour, now.minute) <= (16, 0)
     if not in_session and not FORCE:
         print("outside the regular session (%s NY); nothing to do" % now.strftime("%a %H:%M")); return
@@ -122,7 +147,7 @@ def main():
         ("%+.2f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", 100 * btc_hour, regime, cfg["_source"]))
     core = ("MSTR <b>$%.2f</b> vs projected <b>$%.2f</b> (gap <b>%+.1f%%</b>, about %+.1f%% on MSTX)\n"
             "BTC $%s (%+.1f%% last hour) · STRC $%.2f · mNAV %.3f vs target %.3f\n"
-            "BTC is %s its 50-day ($%s)") % (r["MSTR"], r["proj"], 100 * r["gap"], 200 * r["gap"], format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","))
+            "BTC is %s its 50-day ($%s) · holdings %s") % (r["MSTR"], r["proj"], 100 * r["gap"], 200 * r["gap"], format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC)
     today = str(last_day); fired = []
     def record(kind):
         ledger.append({"kind": kind, "time": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last, 2), "proj": round(float(r["proj"]), 2),
@@ -144,7 +169,8 @@ def main():
     if fired:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
-                  "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime, "fired": fired, "inputs": cfg["_source"]})
+                  "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime, "fired": fired,
+                  "inputs": cfg["_source"], "holdings": HOLD_SRC, "btc_held": BTC_HELD, "shares_m": round(SHARES_M, 3)})
     with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
     print("fired: %s" % (fired or "nothing"))
 
