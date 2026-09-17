@@ -2,10 +2,10 @@
   "btc_held": 845050,
   "shares_m": 450.112,
   "btc_slope_per_2500": 0.0125,
-  "jerk_threshold": -0.015,
+  "lag_threshold": -0.015,
   "cheap_threshold": -0.04,
   "rich_threshold": 0.04,
   "btc_hour_move_floor": -0.01,
   "updated": "2026-09-16",
-  "note": "Update btc_held and shares_m after each Monday 8-K. Slope 0.0125 is the measured mNAV beta to BTC; the sheet uses 0.025."
+  "note": "One file for the MSTR tab and the gap monitor. Update btc_held and shares_m after each Monday 8-K. Slope 0.0125 is the measured mNAV beta to BTC; the sheet uses 0.025."
 }

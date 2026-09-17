@@ -43,6 +43,6 @@ jobs:
           git config user.name  "btc-monitor"
           git config user.email "monitor@noreply"
           git pull --rebase --quiet || true
-          [ -f mstr_state.json ] && git add mstr_state.json || true
+          for f in mstr_state.json mstr_ledger.json; do [ -f "$f" ] && git add "$f"; done; true
           git diff --staged --quiet || git commit -m "mstr state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push
