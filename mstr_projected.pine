@@ -8,7 +8,7 @@ indicator("MSTR projected price (Kaim)", shorttitle="Projected", overlay=true)
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
-slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)
 lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1)
 cheapT    = input.float(-3.0, "Cheap line (% under projection)", step=0.5)
 richT     = input.float(4.0, "Rich line (% over projection)", step=0.5)
