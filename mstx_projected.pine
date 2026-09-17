@@ -94,14 +94,30 @@ plot(swingBuy ? close : na, "Swing buy", color=color.new(color.lime, 0), style=p
 plot(swingSell ? close : na, "Swing sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=4)    // red + on the line
 plot(lagBuy ? close : na, "Lag (day trade)", color=color.new(color.orange, 0), style=plot.style_cross, linewidth=4)   // orange + on the line
 
-// lag trade lines: target +tgtPct% above the signal bar, stop at the dip low, both drawn for the trade's window
-if showLines and lagBuy
-    tgt = close * (1 + tgtPct / 100)
-    stp = math.min(low, low[1])
-    line.new(bar_index, tgt, bar_index + winBars, tgt, color=color.new(color.lime, 0), width=2)
-    line.new(bar_index, stp, bar_index + winBars, stp, color=color.new(color.red, 0), width=2)
-    label.new(bar_index + winBars, tgt, "target " + str.tostring(tgt, "#.##"), style=label.style_label_left, color=color.new(color.lime, 70), textcolor=color.white, size=size.small)
-    label.new(bar_index + winBars, stp, "stop " + str.tostring(stp, "#.##"), style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.small)
+// lag trade lines, drawn at the ENTRY bar (the first green bar after the orange plus):
+// entry = that bar's high, target = entry + tgtPct%, stop = the lowest low from the signal bar to the entry bar. Lines run out the trade's window.
+var bool  pending = false
+var float dipLow  = na
+var int   sigBar  = na
+if lagBuy
+    pending := true
+    dipLow  := math.min(low, low[1])
+    sigBar  := bar_index
+if pending
+    dipLow := math.min(dipLow, low)
+    if close > close[1]
+        entry = high
+        tgt   = entry * (1 + tgtPct / 100)
+        if showLines
+            line.new(bar_index, entry, bar_index + winBars, entry, color=color.new(color.orange, 30), width=1, style=line.style_dotted)
+            line.new(bar_index, tgt, bar_index + winBars, tgt, color=color.new(color.lime, 0), width=2)
+            line.new(bar_index, dipLow, bar_index + winBars, dipLow, color=color.new(color.red, 0), width=2)
+            label.new(bar_index + winBars, tgt, "target " + str.tostring(tgt, "#.##"), style=label.style_label_left, color=color.new(color.lime, 70), textcolor=color.white, size=size.small)
+            label.new(bar_index + winBars, entry, "entry " + str.tostring(entry, "#.##"), style=label.style_label_left, color=color.new(color.orange, 70), textcolor=color.white, size=size.small)
+            label.new(bar_index + winBars, dipLow, "stop " + str.tostring(dipLow, "#.##"), style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.small)
+        pending := false
+    else if bar_index - sigBar > winBars or not session.ismarket
+        pending := false                                   // no green bar inside the window: no trade
 
 alertcondition(lagFire and (not useGate or btcUp), "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
 alertcondition(cheapFire and (not useGate or btcUp), "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
