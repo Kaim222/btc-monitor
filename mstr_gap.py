@@ -194,7 +194,7 @@ def main():
     if not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool and GATE and regime != "above":
         state["last_lag_alert"] = t.isoformat(); record("lag", muted=True); print("lag muted: BTC below its 50-day")
     elif not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool:
-        send_pushover("Lag %+.1f%%" % (100 * r["lag"]),
+        send_pushover("Lag %+.1f%% MSTX" % (200 * r["lag"]),
                       core + "\n\n<b>LAG, day trade.</b> MSTR fell %.1f%% against the projection inside an hour with BTC holding (%.1f%% on MSTX).\n<b>Play:</b> MSTX shares or a deep ITM call, about a quarter of the account.\n<b>Exit:</b> +1.5%% on MSTX or 60 minutes, whichever first. Stop -2.5%% on MSTX. Never hold to the close." % (100 * r["lag"], 200 * r["lag"]), sound="siren")
         state["last_lag_alert"] = t.isoformat(); fired.append("lag"); record("lag")
     # CHEAP and RICH: fire on crossing the line, again when the gap moves a full point further, else at most once an hour while it holds
@@ -207,12 +207,13 @@ def main():
     if g <= CHEAP and level_due("cheap", g, lambda now, last: now <= last - 0.01) and GATE and regime != "above":
         state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; record("cheap", muted=True); print("cheap muted: BTC below its 50-day")
     elif g <= CHEAP and level_due("cheap", g, lambda now, last: now <= last - 0.01):
-        rule = "BTC is trending up or sideways: in the backtest this is the state where the gap closed with MSTR rising." if regime == "above" else "BTC is below its 50-day: the weaker state in the backtest (two to four episodes). Size smaller or wait for BTC to turn."
-        send_pushover("Cheap %+.1f%%" % (100 * g), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
+        rule = ("<b>CHEAP, swing trade.</b> BTC is above its 50-day, the state where cheap closed with MSTR rising (+5.9% MSTR over 5 days in the backtest).\n<b>Play:</b> weekly call vertical from the swing sleeve: long just below the price, short at the projected price.\n<b>Exit:</b> when the gap closes to zero, or after 5 trading days, or the day BTC closes under its 50-day, whichever first."
+                if regime == "above" else "<b>CHEAP, but BTC is below its 50-day.</b> The weaker state in the backtest; the gate is off, so this is context only.")
+        send_pushover("Cheap %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
     if g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01) and GATE and regime != "below":
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01):
-        send_pushover("Rich %+.1f%%" % (100 * g), core + "\n\nRich readings faded about 2% vs BTC over five days in the backtest.", sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is below its 50-day. Rich readings faded about 2% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days.", sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
     if fired:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
