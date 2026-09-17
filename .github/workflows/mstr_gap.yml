@@ -3,6 +3,7 @@ name: MSTR Gap Monitor
 on:
   schedule:
     - cron: '*/5 13-21 * * 1-5'   # every 5 minutes, 13:00-21:59 UTC on weekdays; the script itself keeps to 9:35-16:00 New York
+    - cron: '15,45 * * * *'       # twice an hour around the clock: the BTC 50-day crossing check only
   workflow_dispatch:
     inputs:
       test:

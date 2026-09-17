@@ -148,9 +148,30 @@ def main():
             HOLD_SRC, "auto" if "override" not in HOLD_SRC else "manual", format(int(BTC_HELD), ","), SHARES_M, cfg["_source"], SLOPE, 100 * LAG, 100 * CHEAP, 100 * RICH))
         with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
         return
+    # BTC vs its 50-day: checked on every run, in or out of the session, and pushed when it crosses
+    btc_daily = yf.Ticker("BTC-USD").history(period="80d")["Close"].dropna()
+    btc50 = float(btc_daily.tail(50).mean()); btc_now = float(btc_daily.iloc[-1])
+    regime_now = "above" if btc_now > btc50 else "below"
+    prev_regime = state.get("regime")
+    if prev_regime in ("above", "below") and regime_now != prev_regime:
+        if regime_now == "above":
+            msg = "BTC $%s crossed <b>above</b> its 50-day ($%s).
+<b>Gate:</b> Lag and Cheap alerts are on; Rich is muted.
+<b>Play:</b> cheap swings and lag day trades are allowed again." % (format(round(btc_now), ","), format(round(btc50), ","))
+        else:
+            msg = "BTC $%s crossed <b>below</b> its 50-day ($%s).
+<b>Gate:</b> Lag and Cheap alerts are muted; Rich is on.
+<b>Play:</b> close any open Cheap swing today. No new longs on the gap until BTC is back above." % (format(round(btc_now), ","), format(round(btc50), ","))
+        send_pushover("BTC %s its 50-day" % regime_now, msg, sound="bike")
+        state["regime"] = regime_now; state["regime_changed"] = now.isoformat()
+        with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
+    elif prev_regime not in ("above", "below"):
+        state["regime"] = regime_now
     in_session = now.weekday() < 5 and (now.hour, now.minute) >= (9, 35) and (now.hour, now.minute) <= (16, 0)
     if not in_session and not FORCE:
-        print("outside the regular session (%s NY); nothing to do" % now.strftime("%a %H:%M")); return
+        state["last_regime_check"] = now.isoformat()
+        with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
+        print("outside the regular session (%s NY); BTC %s its 50-day; nothing else to do" % (now.strftime("%a %H:%M"), regime_now)); return
     mstr, btc, mstx = bars("MSTR"), bars("BTC-USD"), bars("MSTX")
     df = pd.concat([mstr.rename("MSTR"), btc.rename("BTC"), mstx.rename("MSTX")], axis=1)
     df["BTC"] = df["BTC"].ffill(); df["MSTX"] = df["MSTX"].ffill(); df = df.dropna()
@@ -164,8 +185,7 @@ def main():
     df = df[df.index.date == last_day]
     if len(df) < 20: print("only %d bars so far; waiting" % len(df)); return
     strc = float(yf.Ticker("STRC").history(period="5d")["Close"].dropna().iloc[-1])
-    btc_daily = yf.Ticker("BTC-USD").history(period="80d")["Close"].dropna()
-    btc50 = float(btc_daily.tail(50).mean()); btc_last = float(df["BTC"].iloc[-1])
+    btc_last = float(df["BTC"].iloc[-1])
     df["target"] = [target(strc, b) for b in df["BTC"]]
     df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
     df["hour_avg"] = df["gap"].shift(1).rolling(60, min_periods=30).mean(); df["lag"] = df["gap"] - df["hour_avg"]
