@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '*/5 13-21 * * 1-5'   # every 5 minutes, 13:00-21:59 UTC on weekdays; the script itself keeps to 9:35-16:00 New York
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'send one test push instead of checking the market'
+        type: boolean
+        default: false
 
 concurrency:
   group: mstr-gap
@@ -31,7 +36,7 @@ jobs:
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
-        run: python mstr_gap.py
+        run: python mstr_gap.py ${{ inputs.test && '--test' || '' }}
 
       - name: Commit updated state
         run: |
