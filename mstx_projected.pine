@@ -23,6 +23,7 @@ strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
 
 btc      = request.security(btcSym, timeframe.period, close)
 mstrI    = request.security(mstrSym, timeframe.period, close)   // MSTR on this chart's bars
+mstrLo   = request.security(mstrSym, timeframe.period, low)     // MSTR's low inside each bar
 strcI    = request.security(strcSym, timeframe.period, close)   // STRC on this chart's bars
 strc     = strcMan > 0 ? strcMan : strcI
 
@@ -67,7 +68,8 @@ sumR := sumR + ratio
 cnt  := cnt + 1
 smaR  = ta.sma(ratio[1], winBars)
 avR   = cnt - 1 >= winBars ? smaR : avSince
-lag   = na(avR) ? na : lev * (ratio / avR - 1) * 100             // MSTR's lag, in MSTX terms (x leverage)
+ratioLo = mstrLo / (btc * target)                                 // the worst point inside the bar
+lag   = na(avR) ? na : lev * (ratioLo / avR - 1) * 100           // MSTR's lag at the bar's low, in MSTX terms (x leverage), so it reads the same on any timeframe
 back  = math.min(winBars, math.max(1, cnt - 1))
 btcMove = (btc / btc[back] - 1) * 100
 armed   = cnt - 1 >= minBars and session.ismarket
