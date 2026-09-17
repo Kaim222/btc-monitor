@@ -82,8 +82,8 @@ plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
 plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
 plot(gap, "Gap (MSTX %)", color=color.new(color.orange, 0), display=display.none)    // hidden; shows in the legend
 plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none)      // hidden; shows in the legend, feeds the alert text as plot_3
-plot(buyBar ? close : na, "Buy", color=color.new(color.lime, 0), style=plot.style_cross, linewidth=3)    // green + on the line
-plot(sellBar ? close : na, "Sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=3)    // red + on the line
+plot(buyBar ? close : na, "Buy", color=color.new(color.lime, 0), style=plot.style_cross, linewidth=4)    // green + on the line
+plot(sellBar ? close : na, "Sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=4)    // red + on the line
 
 alertcondition(lagFire, "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
