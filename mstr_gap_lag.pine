@@ -1,17 +1,18 @@
 //@version=6
-// MSTR gap and lag vs Alex's projected price. Put it on any 1-minute chart (MSTR or MSTX). Pulls MSTR and BTC itself.
+// MSTR gap and lag vs Alex's projected price. Put it on any intraday chart (MSTR or MSTX); it pulls MSTR, BTC and STRC itself.
 // projected MSTR = BTC x (BTC held / ADSO) x target mNAV, target = STRC rule + slope x (BTC - 75,000) / 2,500
-// gap = MSTR / projected - 1. lag = gap minus its average over the previous hour. Alerts: Lag (day trade), Cheap and Rich (swing).
+// gap = MSTR / projected - 1 (needs the holdings inputs; the swing signal).
+// lag = the MSTR-over-BTC ratio vs its own average over the trailing window (holdings cancel out; the day-trade signal).
 indicator("MSTR gap + lag (Kaim)", shorttitle="MSTR gap", overlay=false, format=format.percent, precision=2)
 
-btcHeld   = input.float(845050, "BTC held", step=1)
-sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
+btcHeld   = input.float(845050, "BTC held", step=1, tooltip="Swing lines only. The lag signal does not use it.")
+sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001, tooltip="Swing lines only. The lag signal does not use it.")
 slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
-lagT      = input.float(-1.5, "Lag alert (% vs the last hour)", step=0.1)
+lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1)
 cheapT    = input.float(-3.0, "Cheap line (% under projection)", step=0.5)
 richT     = input.float(4.0, "Rich line (% over projection)", step=0.5)
-btcHold   = input.float(-1.0, "BTC must have held (% over the hour, floor)", step=0.1)
-hourMins  = input.int(60, "Trailing window (minutes)", minval=5)
+btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
+winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
 mstrSym   = input.symbol("NASDAQ:MSTR", "MSTR symbol")
 strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
@@ -30,39 +31,53 @@ strcRule(s) =>
       s >= 82.5 ? 0.80 + (s - 82.5) * 0.005 :
       math.max(0.775, 0.775 + (s - 77.5) * 0.005)
 
-bps    = btcHeld / (sharesM * 1e6)
+// the window is measured in minutes so it means the same thing on 1, 5 and 15 minute charts
+winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
+
+// swing signal: needs holdings
 target = strcRule(strc) + slope * (btc - 75000) / 2500
+bps    = btcHeld / (sharesM * 1e6)
 proj   = btc * bps * target
 gap    = (mstr / proj - 1) * 100
-// the window is measured in minutes so it means the same thing on 1, 5 and 15 minute charts
-hourBars = math.max(2, math.round(hourMins * 60 / timeframe.in_seconds()))
-hourAvg = ta.sma(gap[1], hourBars)
-lag    = gap - hourAvg
-btcHour = (btc / btc[hourBars] - 1) * 100
-// the trailing hour must not reach back across the overnight gap: arm only once the session has a full hour of bars
+
+// day-trade signal: holdings cancel, so this part never needs updating
+ratio   = mstr / (btc * target)
+ratioAv = ta.sma(ratio[1], winBars)
+lag     = (ratio / ratioAv - 1) * 100
+btcMove = (btc / btc[winBars] - 1) * 100
+
+// the window must not reach back across the overnight gap: arm only once the session has a full window of bars
 sinceOpen = ta.barssince(session.isfirstbar)
-warm      = not na(sinceOpen) and sinceOpen >= hourBars
+warm      = not na(sinceOpen) and sinceOpen >= winBars
+
+lagFire   = warm and lag <= lagT and btcMove >= btcHold and session.ismarket
+cheapFire = gap <= cheapT and session.ismarket
+richFire  = gap >= richT and session.ismarket
+buyBar    = lagFire and not lagFire[1]     // the first bar of a lag: one arrow, not a row of them
 
 plot(gap, "Gap vs projection (%)", color=color.new(color.orange, 0), linewidth=2)
-plot(lag, "Lag vs the last hour (%)", color=color.new(color.aqua, 0))
+plot(lag, "Lag vs the trailing window (%)", color=color.new(color.aqua, 0))
 hline(0, "zero", color=color.gray)
 hline(cheapT, "cheap line", color=color.new(color.green, 40), linestyle=hline.style_dotted)
 hline(richT, "rich line", color=color.new(color.red, 40), linestyle=hline.style_dotted)
 hline(lagT, "lag line", color=color.new(color.aqua, 60), linestyle=hline.style_dashed)
-
-lagFire  = warm and lag <= lagT and btcHour >= btcHold and session.ismarket
-cheapFire = gap <= cheapT and session.ismarket
-richFire  = gap >= richT and session.ismarket
 bgcolor(lagFire ? color.new(color.aqua, 80) : cheapFire ? color.new(color.green, 92) : na)   // aqua = lag fired, faint green = under the cheap line
+plotshape(buyBar, "Buy", shape.labelup, location.bottom, color=color.new(color.aqua, 0), text="BUY", textcolor=color.black, size=size.small)
 
-alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its hour, BTC holding. Gap {{plot_0}}%. Window: the next hour.")
+alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its window, BTC holding. Gap {{plot_0}}%. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTR {{plot_0}}% under projection (about 2x on MSTX). Swing line.")
 alertcondition(richFire, "Rich", "MSTR {{plot_0}}% over projection. Rich readings faded about 2% vs BTC over five days.")
 
-var table t = table.new(position.top_right, 2, 5, border_width=1, bgcolor=color.new(color.black, 20), frame_color=color.gray)
+var table t = table.new(position.top_right, 2, 5, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
 if barstate.islast
-    table.cell(t, 0, 0, "MSTR", text_size=size.normal), table.cell(t, 1, 0, str.tostring(mstr, "#.##"), text_size=size.normal)
-    table.cell(t, 0, 1, "projected", text_size=size.normal), table.cell(t, 1, 1, str.tostring(proj, "#.##"), text_size=size.normal)
-    table.cell(t, 0, 2, "gap", text_size=size.normal), table.cell(t, 1, 2, str.tostring(gap, "#.##") + "%", text_size=size.normal, text_color=gap <= cheapT ? color.green : gap >= richT ? color.red : color.white)
-    table.cell(t, 0, 3, "lag (1h)", text_size=size.normal), table.cell(t, 1, 3, str.tostring(lag, "#.##") + "%", text_size=size.normal, text_color=lag <= lagT ? color.aqua : color.white)
-    table.cell(t, 0, 4, "on MSTX (2x)", text_size=size.normal), table.cell(t, 1, 4, str.tostring(gap * 2, "#.##") + "%", text_size=size.normal)
+    W = color.white
+    table.cell(t, 0, 0, "MSTR", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 0, str.tostring(mstr, "#.##"), text_color=W, text_size=size.normal)
+    table.cell(t, 0, 1, "projected", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 1, str.tostring(proj, "#.##"), text_color=W, text_size=size.normal)
+    table.cell(t, 0, 2, "gap", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 2, str.tostring(gap, "#.##") + "%", text_color=gap <= cheapT ? color.lime : gap >= richT ? color.red : W, text_size=size.normal)
+    table.cell(t, 0, 3, "lag", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 3, str.tostring(lag, "#.##") + "%", text_color=lag <= lagT ? color.aqua : W, text_size=size.normal)
+    table.cell(t, 0, 4, "on MSTX (2x)", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 4, str.tostring(gap * 2, "#.##") + "%", text_color=W, text_size=size.normal)
