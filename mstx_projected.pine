@@ -22,10 +22,21 @@ strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
 strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
 
 btc      = request.security(btcSym, timeframe.period, close)
-strcLive = request.security(strcSym, "D", close)
-strc     = strcMan > 0 ? strcMan : strcLive
-mstrPrev = request.security(mstrSym, "D", close[1])            // yesterday's MSTR close
-xPrev    = request.security(syminfo.tickerid, "D", close[1])    // yesterday's MSTX close
+mstrI    = request.security(mstrSym, timeframe.period, close)   // MSTR on this chart's bars
+strcI    = request.security(strcSym, timeframe.period, close)   // STRC on this chart's bars
+strc     = strcMan > 0 ? strcMan : strcI
+
+// yesterday's closes, tracked from the intraday bars themselves (the daily-timeframe lookup lags on history and flips at 4 PM)
+var float xLast = na
+var float mLast = na
+var float xPrev = na
+var float mstrPrev = na
+if session.isfirstbar_regular
+    xPrev    := xLast
+    mstrPrev := mLast
+if session.ismarket
+    xLast := close
+    mLast := mstrI
 
 strcRule(s) =>
     s >= 97.5 ? 0.90 :
