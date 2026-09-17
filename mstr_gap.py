@@ -129,6 +129,8 @@ def score_ledger(df, ledger):
             e["mstr_%dm" % h] = round(100 * (float(after["MSTR"].iloc[k]) / base_m - 1), 2)
             e["btc_%dm" % h] = round(100 * (float(after["BTC"].iloc[k]) / base_b - 1), 2)
             e["rel_%dm" % h] = round(e["mstr_%dm" % h] - e["btc_%dm" % h], 2)
+            if e.get("mstx") and "MSTX" in after.columns:
+                e["mstx_%dm" % h] = round(100 * (float(after["MSTX"].iloc[k]) / float(e["mstx"]) - 1), 2)   # what MSTX itself did
         e["scored"] = True; changed = True
     return changed
 
@@ -144,13 +146,17 @@ def main():
     in_session = now.weekday() < 5 and (now.hour, now.minute) >= (9, 35) and (now.hour, now.minute) <= (16, 0)
     if not in_session and not FORCE:
         print("outside the regular session (%s NY); nothing to do" % now.strftime("%a %H:%M")); return
-    mstr, btc = bars("MSTR"), bars("BTC-USD")
-    df = pd.concat([mstr.rename("MSTR"), btc.rename("BTC")], axis=1)
-    df["BTC"] = df["BTC"].ffill(); df = df.dropna()
+    mstr, btc, mstx = bars("MSTR"), bars("BTC-USD"), bars("MSTX")
+    df = pd.concat([mstr.rename("MSTR"), btc.rename("BTC"), mstx.rename("MSTX")], axis=1)
+    df["BTC"] = df["BTC"].ffill(); df["MSTX"] = df["MSTX"].ffill(); df = df.dropna()
     df = df[(df.index.time >= datetime.strptime("09:30", "%H:%M").time()) & (df.index.time <= datetime.strptime("16:00", "%H:%M").time())]
     if score_ledger(df, ledger):
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
-    last_day = df.index[-1].date(); df = df[df.index.date == last_day]
+    last_day = df.index[-1].date()
+    prev = df[df.index.date < last_day]                      # yesterday's last regular bar sets the MSTX mapping
+    mstr_prev = float(prev["MSTR"].iloc[-1]) if len(prev) else float(df["MSTR"].iloc[0])
+    mstx_prev = float(prev["MSTX"].iloc[-1]) if len(prev) else float(df["MSTX"].iloc[0])
+    df = df[df.index.date == last_day]
     if len(df) < 20: print("only %d bars so far; waiting" % len(df)); return
     strc = float(yf.Ticker("STRC").history(period="5d")["Close"].dropna().iloc[-1])
     btc_daily = yf.Ticker("BTC-USD").history(period="80d")["Close"].dropna()
@@ -158,6 +164,8 @@ def main():
     df["target"] = [target(strc, b) for b in df["BTC"]]
     df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
     df["hour_avg"] = df["gap"].shift(1).rolling(60, min_periods=30).mean(); df["lag"] = df["gap"] - df["hour_avg"]
+    df["proj_x"] = mstx_prev * (1 + 2.0 * (df["proj"] / mstr_prev - 1))     # projected MSTX: yesterday's close moved 2x MSTR's projected move
+    df["gap_x"] = df["MSTX"] / df["proj_x"] - 1
     r = df.iloc[-1]; t = df.index[-1]
     btc_hour = btc_last / float(df["BTC"].iloc[max(0, len(df) - 61)]) - 1
     regime = "above" if btc_last > btc50 else "below"
@@ -165,13 +173,16 @@ def main():
     print("%s  MSTR %.2f  BTC %s  STRC %.2f  mNAV %.3f  target %.3f  projected %.2f  gap %+.2f%%  lag %s  BTC 1h %+.2f%%  BTC %s its 50-day  (inputs: %s)" % (
         t.strftime("%Y-%m-%d %H:%M"), r["MSTR"], format(round(btc_last), ","), strc, mnav, r["target"], r["proj"], 100 * r["gap"],
         ("%+.2f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", 100 * btc_hour, regime, cfg["_source"]))
-    core = ("MSTR <b>$%.2f</b> vs projected <b>$%.2f</b> (gap <b>%+.1f%%</b>, about %+.1f%% on MSTX)\n"
+    core = ("MSTX <b>$%.2f</b> vs projected <b>$%.2f</b> (gap <b>%+.1f%%</b>)\n"
+            "MSTR $%.2f vs projected $%.2f (gap %+.1f%%, lag %s)\n"
             "BTC $%s (%+.1f%% last hour) · STRC $%.2f · mNAV %.3f vs target %.3f\n"
-            "BTC is %s its 50-day ($%s) · holdings %s") % (r["MSTR"], r["proj"], 100 * r["gap"], 200 * r["gap"], format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC)
+            "BTC is %s its 50-day ($%s) · holdings %s") % (r["MSTX"], r["proj_x"], 100 * r["gap_x"], r["MSTR"], r["proj"], 100 * r["gap"],
+            ("%+.1f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC)
     today = str(last_day); fired = []
     def record(kind):
         ledger.append({"kind": kind, "time": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last, 2), "proj": round(float(r["proj"]), 2),
-                       "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime})
+                       "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime,
+                       "mstx": round(float(r["MSTX"]), 2), "proj_mstx": round(float(r["proj_x"]), 2), "gap_mstx": round(100 * float(r["gap_x"]), 2)})
     # LAG
     last_lag = state.get("last_lag_alert")
     cool = last_lag and (t - datetime.fromisoformat(last_lag)) < timedelta(minutes=60)
@@ -195,6 +206,7 @@ def main():
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
                   "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime, "fired": fired,
+                  "mstx": round(float(r["MSTX"]), 2), "proj_mstx": round(float(r["proj_x"]), 2), "gap_mstx": round(100 * float(r["gap_x"]), 2),
                   "inputs": cfg["_source"], "holdings": HOLD_SRC, "btc_held": BTC_HELD, "shares_m": round(SHARES_M, 3)})
     with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
     print("fired: %s" % (fired or "nothing"))
