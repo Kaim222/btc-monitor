@@ -1,0 +1,43 @@
+name: MSTR Gap Monitor
+
+on:
+  schedule:
+    - cron: '*/5 13-21 * * 1-5'   # every 5 minutes, 13:00-21:59 UTC on weekdays; the script itself keeps to 9:35-16:00 New York
+  workflow_dispatch:
+
+concurrency:
+  group: mstr-gap
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install -q yfinance pandas
+
+      - name: Run MSTR gap monitor
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
+        run: python mstr_gap.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name  "btc-monitor"
+          git config user.email "monitor@noreply"
+          git pull --rebase --quiet || true
+          git add mstr_state.json
+          git diff --staged --quiet || git commit -m "mstr state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
