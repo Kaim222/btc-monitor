@@ -5,10 +5,13 @@ Projected MSTR = BTC x (BTC held / shares) x target mNAV, target = STRC rule + s
 gap = MSTR / projected - 1.
 
 Three alerts:
-  LAG    the gap falls 1.5 points or more below its own average over the previous hour while BTC has held
-         (BTC's own hour move better than -1%). In words: MSTR just dropped about 1.5% against the projection inside
-         an hour and BTC did not. The minute-scale backtest (Jul-Sep 2026) shows these closing within 30 to 60 minutes.
-         Cooldown 60 minutes.
+  LAG    the gap falls past lag_threshold (config, -1.25% MSTR = -2.5% MSTX) below its own average over the previous
+         hour while BTC has held (BTC's own hour move better than -1%), measured at MSTR's bar LOW, which is where
+         mstx_projected.pine measures it. Every bar since the previous run is scanned and the deepest one is judged, so
+         a lag that lives in one minute is not missed by a five-minute poll. Cooldown 60 minutes. Readings past
+         lag_watch (-0.75% MSTR) are written to the ledger without a push, so near misses are on the record.
+         These three settings were wrong until 2026-09-17: the threshold was -1.5% MSTR, the measure was the close, and
+         only the newest bar was judged. Alex took a lag trade at 11:13 that day and no push ever went out.
   CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
          point further, and hourly while it holds. Carries BTC's 50-day state as context (not a gate).
   RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence.
@@ -87,6 +90,8 @@ SLOPE = float(cfg.get("btc_slope_per_2500", 0.0125))
 LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.04)), float(cfg.get("rich_threshold", 0.04))
 BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
 GATE = bool(cfg.get("regime_gate", True))     # Lag and Cheap push only with BTC above its 50-day; Rich only below. Muted ones are still logged.
+LAG_AT_LOW = bool(cfg.get("lag_at_low", True))          # measure the lag at MSTR's bar low, where the indicator measures it
+LAG_WATCH = float(cfg.get("lag_watch", -0.0075))        # log a row at this depth even when nothing fires, so near misses are on the record
 BPS = BTC_HELD / (SHARES_M * 1e6)
 
 def strc_rule(s):
@@ -144,10 +149,11 @@ if _h and _s and "override" not in HOLD_SRC:
         send_pushover("Holdings changed", "Strategy now shows <b>%s BTC</b> over <b>%.3fM</b> assumed diluted shares (was %s / %.3fM). The site and this monitor already use the new numbers. Type the two numbers into the TradingView indicator's settings (or re-paste mstx_projected.pine from the monitor repo, its defaults are updated)." % (
             format(int(_h), ","), _s, format(int(float(_prev.get("btc_held", 0))), ","), float(_prev.get("shares_m", 0))), sound="magic")
 
-def bars(ticker, interval="1m", period="2d"):   # BTC "1d" is the UTC day and goes empty after 8 PM New York, so two days
+def bars(ticker, interval="1m", period="2d", field="Close"):   # BTC "1d" is the UTC day and goes empty after 8 PM New York, so two days
     h = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
     if h.empty: raise RuntimeError("no %s bars for %s" % (interval, ticker))
-    h.index = h.index.tz_convert(NY); return h["Close"]
+    h.index = h.index.tz_convert(NY)
+    return h[field] if isinstance(field, str) else h[list(field)]
 
 def score_ledger(df, ledger):
     """Fill in the 30 and 60 minute outcomes (MSTR minus BTC, in percent) for alerts that now have the bars to score them."""
@@ -223,8 +229,9 @@ def main():
         state["last_regime_check"] = now.isoformat()
         with open(STATE_FILE, "w") as f: json.dump(state, f, indent=2)
         print("outside the regular session (%s NY); BTC %s its 50-day; nothing else to do" % (now.strftime("%a %H:%M"), regime_now)); return
-    mstr, btc, mstx = bars("MSTR"), bars("BTC-USD"), bars("MSTX")
-    df = pd.concat([mstr.rename("MSTR"), btc.rename("BTC"), mstx.rename("MSTX")], axis=1)
+    mstr_f = bars("MSTR", field=("Close", "Low"))          # the Low feeds the lag, so the monitor measures where the indicator measures
+    mstr, mstr_lo, btc, mstx = mstr_f["Close"], mstr_f["Low"], bars("BTC-USD"), bars("MSTX")
+    df = pd.concat([mstr.rename("MSTR"), mstr_lo.rename("MSTRLO"), btc.rename("BTC"), mstx.rename("MSTX")], axis=1)
     df["BTC"] = df["BTC"].ffill(); df["MSTX"] = df["MSTX"].ffill(); df = df.dropna()
     df = df[(df.index.time >= datetime.strptime("09:30", "%H:%M").time()) & (df.index.time <= datetime.strptime("16:00", "%H:%M").time())]
     if score_ledger(df, ledger):
@@ -239,7 +246,12 @@ def main():
     btc_last = float(df["BTC"].iloc[-1])
     df["target"] = [target(strc, b) for b in df["BTC"]]
     df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
-    df["hour_avg"] = df["gap"].shift(1).rolling(60, min_periods=30).mean(); df["lag"] = df["gap"] - df["hour_avg"]
+    df["hour_avg"] = df["gap"].shift(1).rolling(60, min_periods=30).mean()
+    # the lag is measured at MSTR's bar LOW, the same place mstx_projected.pine measures it. Measuring at the close
+    # hid a real signal on 9/17: the chart printed its orange plus at 11:13 to 11:16 and the close-based reading never
+    # reached the line. gap_lo is the same gap computed off the bar's low.
+    df["gap_lo"] = df["MSTRLO"] / df["proj"] - 1
+    df["lag"] = (df["gap_lo"] if LAG_AT_LOW else df["gap"]) - df["hour_avg"]
     df["proj_x"] = mstx_prev * (1 + 2.0 * (df["proj"] / mstr_prev - 1))     # projected MSTX: yesterday's close moved 2x MSTR's projected move
     df["gap_x"] = df["MSTX"] / df["proj_x"] - 1
     r = df.iloc[-1]; t = df.index[-1]
@@ -256,20 +268,35 @@ def main():
             "Ladder: <b>%s</b> band on the monthly close (%sq) · live %.1fq") % (r["MSTX"], r["proj_x"], 100 * r["gap_x"], r["MSTR"], r["proj"], 100 * r["gap"],
             ("%+.1f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", format(round(btc_last), ","), 100 * btc_hour, strc, mnav, r["target"], regime, format(round(btc50), ","), HOLD_SRC,
             state.get("band", "unknown"), state.get("band_q", "?"), ladder_q(btc_last, datetime.now(timezone.utc)))
-    today = str(last_day); fired = []
-    def record(kind, muted=False):
-        ledger.append({"kind": kind, "muted": muted, "time": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last, 2), "proj": round(float(r["proj"]), 2),
-                       "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime,
-                       "mstx": round(float(r["MSTX"]), 2), "proj_mstx": round(float(r["proj_x"]), 2), "gap_mstx": round(100 * float(r["gap_x"]), 2)})
-    # LAG
+    today = str(last_day); fired = []; rows0 = len(ledger)
+    def record(kind, muted=False, row=None, when=None):
+        q = r if row is None else row; w = t if when is None else when       # a lag can trigger on a bar older than the newest one
+        ledger.append({"kind": kind, "muted": muted, "time": w.isoformat(), "mstr": round(float(q["MSTR"]), 2), "btc": round(float(q["BTC"]), 2), "proj": round(float(q["proj"]), 2),
+                       "gap": round(100 * float(q["gap"]), 2), "lag": None if math.isnan(q["lag"]) else round(100 * float(q["lag"]), 2), "regime": regime,
+                       "mstx": round(float(q["MSTX"]), 2), "proj_mstx": round(float(q["proj_x"]), 2), "gap_mstx": round(100 * float(q["gap_x"]), 2)})
+    # LAG. This runs every 5 minutes but the lag lives in single minutes, so judging only the newest bar looks at one
+    # minute in five. On 9/17 the chart's trigger was met at 11:13, 11:14 and 11:16 and every one of those fell between
+    # polls, so nothing was ever sent. Scan every bar since the previous run and judge the deepest one.
+    df["btc_hour"] = df["BTC"] / df["BTC"].shift(60) - 1
+    lb = state.get("last_bar")
+    scan = df[df.index > datetime.fromisoformat(lb)] if lb else df.iloc[0:0]
+    if len(scan) < 2 or len(scan) > 30: scan = df.tail(6)                 # first run of the day, a gap, or a stale state
+    scan = scan[scan["lag"].notna()]
+    if len(scan):
+        li = scan["lag"].idxmin(); rl = df.loc[li]
+        lag_v, lag_t, lag_bh = float(rl["lag"]), li, float(rl["btc_hour"]) if not pd.isna(rl["btc_hour"]) else btc_hour
+    else:
+        lag_v, lag_t, lag_bh = float(r["lag"]), t, btc_hour
+    ago = "" if lag_t == t else " (that minute was %s, %d minutes back)" % (lag_t.strftime("%H:%M"), round((t - lag_t).total_seconds() / 60))
     last_lag = state.get("last_lag_alert")
-    cool = last_lag and (t - datetime.fromisoformat(last_lag)) < timedelta(minutes=60)
-    if not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool and GATE and regime != "above":
-        state["last_lag_alert"] = t.isoformat(); record("lag", muted=True); print("lag muted: BTC below its 50-day")
-    elif not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool:
-        send_pushover("Lag %+.1f%% MSTX" % (200 * r["lag"]),
-                      core + "\n\n<b>LAG, day trade.</b> MSTR fell %.1f%% against the projection inside an hour with BTC holding (%.1f%% on MSTX).\n<b>Play:</b> one long MSTX call at about 0.8 delta (nearest strike below the price), nearest expiry at least a day out, from the lag sleeve. Enter above the first green bar.\n<b>Exit:</b> +1.5%% on MSTX from entry or 60 minutes, whichever first. Stop under the dip low. Never hold to the close." % (100 * r["lag"], 200 * r["lag"]), sound="siren")
-        state["last_lag_alert"] = t.isoformat(); fired.append("lag"); record("lag")
+    cool = last_lag and (lag_t - datetime.fromisoformat(last_lag)) < timedelta(minutes=60)
+    due = not math.isnan(lag_v) and lag_v <= LAG and lag_bh >= BTC_HOLD and not cool
+    if due and GATE and regime != "above":
+        state["last_lag_alert"] = lag_t.isoformat(); record("lag", muted=True, row=df.loc[lag_t], when=lag_t); print("lag muted: BTC below its 50-day")
+    elif due:
+        send_pushover("Lag %+.1f%% MSTX" % (200 * lag_v),
+                      core + "\n\n<b>LAG, day trade.</b> MSTR fell %.1f%% against the projection inside an hour with BTC holding (%.1f%% on MSTX)%s.\n<b>Play:</b> one long MSTX call at about 0.8 delta (nearest strike below the price), nearest expiry at least a day out, from the lag sleeve. Enter above the first green bar.\n<b>Exit:</b> +1.5%% on MSTX from entry or 60 minutes, whichever first. Stop under the dip low. Never hold to the close." % (100 * lag_v, 200 * lag_v, ago), sound="siren")
+        state["last_lag_alert"] = lag_t.isoformat(); fired.append("lag"); record("lag", row=df.loc[lag_t], when=lag_t)
     # CHEAP and RICH: fire on crossing the line, again when the gap moves a full point further, else at most once an hour while it holds
     def level_due(kind, gap_now, beyond):
         last_t = state.get("last_%s_alert" % kind); last_g = state.get("last_%s_gap" % kind)
@@ -288,8 +315,17 @@ def main():
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH and level_due("rich", g, lambda now, last: now >= last + 0.01):
         send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % regime, sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
-    if fired:
+    # A near miss is data too. Without this the ledger only ever held alerts, so nothing that did not fire was on the
+    # record and the file itself never got created (it 404'd to the site all week). At most one watch row per 30 minutes.
+    if not fired and not math.isnan(lag_v) and lag_v <= LAG_WATCH:
+        lw = state.get("last_watch_row")
+        if not lw or (lag_t - datetime.fromisoformat(lw)) >= timedelta(minutes=30):
+            record("watch", row=df.loc[lag_t], when=lag_t); state["last_watch_row"] = lag_t.isoformat()
+            print("watch row logged: lag %+.2f%% MSTR (%+.2f%% MSTX) at %s, no alert" % (100 * lag_v, 200 * lag_v, lag_t.strftime("%H:%M")))
+    if len(ledger) != rows0:
         with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)
+    elif not os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "w") as f: json.dump(ledger, f, indent=2)      # so the site fetches [] instead of a 404
     state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
                   "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime, "fired": fired,
                   "mstx": round(float(r["MSTX"]), 2), "proj_mstx": round(float(r["proj_x"]), 2), "gap_mstx": round(100 * float(r["gap_x"]), 2),
