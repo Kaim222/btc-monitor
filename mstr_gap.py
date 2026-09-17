@@ -161,7 +161,7 @@ def main():
         state["last_lag_alert"] = t.isoformat(); fired.append("lag"); record("lag")
     # CHEAP, once a day
     if r["gap"] <= CHEAP and state.get("last_cheap_day") != today:
-        rule = "BTC is trending up or sideways: the daily backtest says this is when the gap closes with MSTR rising." if regime == "above" else "BTC is below its 50-day: the daily backtest says the gap tends to close by BTC falling. Not a buy signal on its own."
+        rule = "BTC is trending up or sideways: in the backtest this is the state where the gap closed with MSTR rising." if regime == "above" else "BTC is below its 50-day: the weaker state in the backtest (two to four episodes). Size smaller or wait for BTC to turn."
         send_pushover("Cheap %+.1f%%" % (100 * r["gap"]), core + "\n\n" + rule); state["last_cheap_day"] = today; fired.append("cheap"); record("cheap")
     # RICH, once a day
     if r["gap"] >= RICH and state.get("last_rich_day") != today:
