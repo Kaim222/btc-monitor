@@ -4,7 +4,7 @@
 // where projected MSTR = BTC x (BTC held / ADSO) x target mNAV and target = STRC rule + slope x (BTC - 75,000) / 2,500.
 // gap  = MSTX vs projected MSTX, percent (the swing signal; needs the holdings inputs).
 // lag  = MSTX's own move over the trailing window minus leverage x BTC's target-adjusted move (the day-trade signal; no holdings needed).
-indicator("MSTX projected (Kaim)", shorttitle="MSTX proj", overlay=true, max_labels_count=200)
+indicator("MSTX projected (Kaim)", shorttitle="MSTX proj", overlay=true)
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
@@ -88,10 +88,9 @@ plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
 plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
 plot(gap, "Gap (MSTX %)", color=color.new(color.orange, 0), display=display.none)    // hidden; shows in the legend
 plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none)      // hidden; shows in the legend, feeds the alert text as plot_3
-if buyBar
-    label.new(bar_index, close, "BUY", style=label.style_label_up, color=color.new(color.aqua, 0), textcolor=color.black, size=size.small)
-if sellBar
-    label.new(bar_index, close, "SELL", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+// marks sit at the pane's edges so they never change its scale, in a pane or on the price chart
+plotshape(buyBar, "Buy", shape.triangleup, location.bottom, color=color.new(color.aqua, 0), text="BUY", textcolor=color.aqua, size=size.tiny)
+plotshape(sellBar, "Sell", shape.triangledown, location.top, color=color.new(color.red, 0), text="SELL", textcolor=color.red, size=size.tiny)
 
 alertcondition(lagFire, "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
@@ -100,11 +99,11 @@ alertcondition(richFire, "Rich", "MSTX is over the rich line vs projection.")
 var table tb = table.new(position.top_right, 2, 4, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
 if barstate.islast
     W = color.white
-    table.cell(tb, 0, 0, "MSTX", text_color=W, text_size=size.normal)
-    table.cell(tb, 1, 0, str.tostring(close, "#.##"), text_color=W, text_size=size.normal)
-    table.cell(tb, 0, 1, "projected", text_color=W, text_size=size.normal)
-    table.cell(tb, 1, 1, str.tostring(projX, "#.##"), text_color=color.aqua, text_size=size.normal)
-    table.cell(tb, 0, 2, "gap", text_color=W, text_size=size.normal)
-    table.cell(tb, 1, 2, str.tostring(gap, "#.##") + "%", text_color=gap <= cheapT ? color.lime : gap >= richT ? color.red : W, text_size=size.normal)
-    table.cell(tb, 0, 3, "lag", text_color=W, text_size=size.normal)
-    table.cell(tb, 1, 3, na(lag) ? "warming up" : str.tostring(lag, "#.##") + "%", text_color=not na(lag) and lag <= lagT ? color.aqua : W, text_size=size.normal)
+    table.cell(tb, 0, 0, "MSTX", text_color=W, text_size=size.small)
+    table.cell(tb, 1, 0, str.tostring(close, "#.##"), text_color=W, text_size=size.small)
+    table.cell(tb, 0, 1, "projected", text_color=W, text_size=size.small)
+    table.cell(tb, 1, 1, str.tostring(projX, "#.##"), text_color=color.aqua, text_size=size.small)
+    table.cell(tb, 0, 2, "gap", text_color=W, text_size=size.small)
+    table.cell(tb, 1, 2, str.tostring(gap, "#.##") + "%", text_color=gap <= cheapT ? color.lime : gap >= richT ? color.red : W, text_size=size.small)
+    table.cell(tb, 0, 3, "lag", text_color=W, text_size=size.small)
+    table.cell(tb, 1, 3, na(lag) ? "warming up" : str.tostring(lag, "#.##") + "%", text_color=not na(lag) and lag <= lagT ? color.aqua : W, text_size=size.small)
