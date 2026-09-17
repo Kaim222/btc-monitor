@@ -195,7 +195,7 @@ def main():
         state["last_lag_alert"] = t.isoformat(); record("lag", muted=True); print("lag muted: BTC below its 50-day")
     elif not math.isnan(r["lag"]) and r["lag"] <= LAG and btc_hour >= BTC_HOLD and not cool:
         send_pushover("Lag %+.1f%%" % (100 * r["lag"]),
-                      core + "\n\nMSTR fell <b>%.1f%%</b> against the projection over the last hour while BTC held. In the backtest these closed within 30 to 60 minutes. Window: the next hour." % (100 * r["lag"]), sound="siren")
+                      core + "\n\n<b>LAG, day trade.</b> MSTR fell %.1f%% against the projection inside an hour with BTC holding (%.1f%% on MSTX).\n<b>Play:</b> MSTX shares or a deep ITM call, about a quarter of the account.\n<b>Exit:</b> +1.5%% on MSTX or 60 minutes, whichever first. Stop -2.5%% on MSTX. Never hold to the close." % (100 * r["lag"], 200 * r["lag"]), sound="siren")
         state["last_lag_alert"] = t.isoformat(); fired.append("lag"); record("lag")
     # CHEAP and RICH: fire on crossing the line, again when the gap moves a full point further, else at most once an hour while it holds
     def level_due(kind, gap_now, beyond):
