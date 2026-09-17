@@ -62,17 +62,19 @@ def strategy_holdings(state):
 _state0 = load(STATE_FILE, {})
 _prev = dict(_state0.get("strategy_last") or {})
 _h, _s, HOLD_SRC = strategy_holdings(_state0)
-PINE_FILE = "mstr_gap_lag.pine"
+PINE_FILES = ["mstr_gap_lag.pine", "mstr_projected.pine"]
 def sync_pine(held, shares_m):
-    """Rewrite the TradingView indicator's two default inputs so a re-paste carries the new holdings. Returns True if changed."""
+    """Rewrite the TradingView indicators' two default inputs so a re-paste carries the new holdings. Returns True if any changed."""
     import re
-    if not os.path.exists(PINE_FILE): return False
-    src = open(PINE_FILE, encoding="utf-8").read()
-    new = re.sub(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held)), src)
-    new = re.sub(r'input\.float\([0-9.]+, "Assumed diluted shares \(M\)"', 'input.float(%.3f, "Assumed diluted shares (M)"' % shares_m, new)
-    if new != src:
-        open(PINE_FILE, "w", encoding="utf-8").write(new); return True
-    return False
+    changed = False
+    for pf in PINE_FILES:
+        if not os.path.exists(pf): continue
+        src = open(pf, encoding="utf-8").read()
+        new = re.sub(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held)), src)
+        new = re.sub(r'input\.float\([0-9.]+, "Assumed diluted shares \(M\)"', 'input.float(%.3f, "Assumed diluted shares (M)"' % shares_m, new)
+        if new != src:
+            open(pf, "w", encoding="utf-8").write(new); changed = True
+    return changed
 if _h and _s and "override" not in HOLD_SRC:
     changed = sync_pine(_h, _s)
     moved = _prev and (abs(float(_prev.get("btc_held", 0)) - _h) >= 1 or abs(float(_prev.get("shares_m", 0)) - _s) >= 0.001)
