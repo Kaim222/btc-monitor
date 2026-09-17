@@ -16,12 +16,15 @@ richT     = input.float(8.0, "Rich line, MSTX % over projection", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 minMins   = input.int(20, "Minutes after the open before the lag can fire", minval=5)
+useGate   = input.bool(true, "Trend gate: buys only with BTC above its 50-day, sells only below")
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
 mstrSym   = input.symbol("BATS:MSTR", "MSTR symbol (the fund's underlying)")
 strcSym   = input.symbol("BATS:STRC", "STRC symbol")
 strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
 
 btc      = request.security(btcSym, timeframe.period, close)
+btcMa50  = request.security(btcSym, "D", ta.sma(close, 50))        // BTC's 50-day average, computed on daily bars
+btcUp    = btc > btcMa50
 mstrI    = request.security(mstrSym, timeframe.period, close)   // MSTR on this chart's bars
 mstrLo   = request.security(mstrSym, timeframe.period, low)     // MSTR's low inside each bar
 strcI    = request.security(strcSym, timeframe.period, close)   // STRC on this chart's bars
@@ -77,8 +80,8 @@ armed   = cnt - 1 >= minBars and session.ismarket
 lagFire   = armed and not na(lag) and lag <= lagT and btcMove >= btcHold
 cheapFire = gap <= cheapT and session.ismarket
 richFire  = gap >= richT and session.ismarket
-buyBar    = lagFire and not lagFire[1]
-sellBar   = richFire and not richFire[1]
+buyBar    = lagFire and not lagFire[1] and (not useGate or btcUp)
+sellBar   = richFire and not richFire[1] and (not useGate or not btcUp)
 
 plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
 plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
@@ -87,9 +90,9 @@ plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none) 
 plot(buyBar ? close : na, "Buy", color=color.new(color.lime, 0), style=plot.style_cross, linewidth=4)    // green + on the line
 plot(sellBar ? close : na, "Sell", color=color.new(color.red, 0), style=plot.style_cross, linewidth=4)    // red + on the line
 
-alertcondition(lagFire, "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
-alertcondition(cheapFire, "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
-alertcondition(richFire, "Rich", "MSTX is over the rich line vs projection.")
+alertcondition(lagFire and (not useGate or btcUp), "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
+alertcondition(cheapFire and (not useGate or btcUp), "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
+alertcondition(richFire and (not useGate or not btcUp), "Rich", "MSTX is over the rich line vs projection.")
 
 var table tb = table.new(position.top_right, 2, 4, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
 if barstate.islast
