@@ -39,11 +39,31 @@ jobs:
           PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
         run: python mstr_gap.py ${{ inputs.test && '--test' || '' }}
 
+      # No rebase. Two runs that overlap were conflicting on mstr_state.json and failing the job (9/17).
+      # State and the pine files are newest-wins, so take this run's copy over whatever is on main.
+      # The ledger is append-only, so it is unioned with main rather than overwritten.
+      # A lost race retries; if it still cannot push, the job still succeeds, because the alert has already been sent.
       - name: Commit updated state
         run: |
+          set -u
           git config user.name  "btc-monitor"
           git config user.email "monitor@noreply"
-          for f in mstr_state.json mstr_ledger.json mstr_gap_lag.pine mstr_projected.pine mstx_projected.pine; do [ -f "$f" ] && git add "$f"; done; true
-          git diff --staged --quiet || git commit -m "mstr state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git pull --rebase --quiet || true
-          git push || (git pull --rebase --quiet && git push)
+          FILES="mstr_state.json mstr_ledger.json mstr_gap_lag.pine mstr_projected.pine mstx_projected.pine"
+          mkdir -p /tmp/keep
+          for f in $FILES; do [ -f "$f" ] && cp "$f" "/tmp/keep/$f"; done
+          for i in 1 2 3; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            for f in $FILES; do [ -f "/tmp/keep/$f" ] && cp "/tmp/keep/$f" "$f"; done
+            if [ -f "/tmp/keep/mstr_ledger.json" ]; then
+              git show origin/main:mstr_ledger.json > /tmp/remote_ledger.json 2>/dev/null || echo "[]" > /tmp/remote_ledger.json
+              python merge_ledger.py /tmp/remote_ledger.json /tmp/keep/mstr_ledger.json mstr_ledger.json
+            fi
+            for f in $FILES; do [ -f "$f" ] && git add "$f"; done
+            if git diff --staged --quiet; then echo "nothing to commit"; exit 0; fi
+            git commit -q -m "mstr state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if git push -q origin HEAD:main; then echo "state pushed on try $i"; exit 0; fi
+            echo "push raced another run, retrying ($i of 3)"
+          done
+          echo "state not pushed after 3 tries; the alert itself already went out"
+          exit 0
