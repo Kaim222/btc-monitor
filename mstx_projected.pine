@@ -1,0 +1,95 @@
+//@version=6
+// MSTX projected price. Put it on the MSTX chart (any intraday timeframe). Everything is in MSTX terms.
+// Projected MSTX = yesterday's MSTX close x (1 + leverage x (projected MSTR / yesterday's MSTR close - 1)),
+// where projected MSTR = BTC x (BTC held / ADSO) x target mNAV and target = STRC rule + slope x (BTC - 75,000) / 2,500.
+// gap  = MSTX vs projected MSTX, percent (the swing signal; needs the holdings inputs).
+// lag  = MSTX's own move over the trailing window minus leverage x BTC's target-adjusted move (the day-trade signal; no holdings needed).
+indicator("MSTX projected (Kaim)", shorttitle="MSTX proj", overlay=true)
+
+btcHeld   = input.float(845050, "BTC held", step=1)
+sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
+slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+lev       = input.float(2.0, "Fund leverage (MSTX = 2)", step=0.5)
+lagT      = input.float(-3.0, "Lag alert, MSTX % vs the trailing window", step=0.5)
+cheapT    = input.float(-6.0, "Cheap line, MSTX % under projection", step=0.5)
+richT     = input.float(8.0, "Rich line, MSTX % over projection", step=0.5)
+btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
+winMins   = input.int(60, "Trailing window (minutes)", minval=5)
+minMins   = input.int(20, "Minutes after the open before the lag can fire", minval=5)
+btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
+mstrSym   = input.symbol("NASDAQ:MSTR", "MSTR symbol (the fund's underlying)")
+strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
+strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
+
+btc      = request.security(btcSym, timeframe.period, close)
+strcLive = request.security(strcSym, "D", close)
+strc     = strcMan > 0 ? strcMan : strcLive
+mstrPrev = request.security(mstrSym, "D", close[1])            // yesterday's MSTR close
+xPrev    = request.security(syminfo.tickerid, "D", close[1])    // yesterday's MSTX close
+
+strcRule(s) =>
+    s >= 97.5 ? 0.90 :
+      s >= 95 ? 0.875 + (s - 95) * 0.01 :
+      s >= 92.5 ? 0.85 + (s - 92.5) * 0.01 :
+      s >= 87.5 ? 0.825 + (s - 87.5) * 0.005 :
+      s >= 82.5 ? 0.80 + (s - 82.5) * 0.005 :
+      math.max(0.775, 0.775 + (s - 77.5) * 0.005)
+
+target = strcRule(strc) + slope * (btc - 75000) / 2500
+bps    = btcHeld / (sharesM * 1e6)
+projM  = btc * bps * target                                       // projected MSTR (internal)
+projX  = xPrev * (1 + lev * (projM / mstrPrev - 1))               // projected MSTX
+gap    = (close / projX - 1) * 100                                // MSTX vs projected, percent
+
+// lag, in MSTX terms: MSTX's move over the window minus leverage x BTC's target-adjusted move over the same window.
+// The window is in minutes so it means the same on 1, 5 and 15 minute charts. In the first hour it averages the bars since the open.
+winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
+minBars = math.max(1, math.round(minMins * 60 / timeframe.in_seconds()))
+drv     = btc * target                                            // what MSTR "should" track
+var float sumX = 0.0
+var float sumD = 0.0
+var int   cnt  = 0
+if session.isfirstbar_regular
+    sumX := 0.0
+    sumD := 0.0
+    cnt  := 0
+avXsince = cnt > 0 ? sumX / cnt : na
+avDsince = cnt > 0 ? sumD / cnt : na
+sumX := sumX + close
+sumD := sumD + drv
+cnt  := cnt + 1
+smaX  = ta.sma(close[1], winBars)
+smaD  = ta.sma(drv[1], winBars)
+avX   = cnt - 1 >= winBars ? smaX : avXsince
+avD   = cnt - 1 >= winBars ? smaD : avDsince
+lag   = na(avX) or na(avD) ? na : ((close / avX - 1) - lev * (drv / avD - 1)) * 100
+back  = math.min(winBars, math.max(1, cnt - 1))
+btcMove = (btc / btc[back] - 1) * 100
+armed   = cnt - 1 >= minBars and session.ismarket
+
+lagFire   = armed and not na(lag) and lag <= lagT and btcMove >= btcHold
+cheapFire = gap <= cheapT and session.ismarket
+richFire  = gap >= richT and session.ismarket
+buyBar    = lagFire and not lagFire[1]
+
+plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
+plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
+plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none)   // hidden; feeds the alert text as plot_2
+bgcolor(cheapFire ? color.new(color.green, 92) : richFire ? color.new(color.red, 94) : na)
+plotshape(buyBar, "Buy", shape.labelup, location.belowbar, color=color.new(color.aqua, 0), text="BUY", textcolor=color.black, size=size.small)
+
+alertcondition(lagFire, "Lag", "MSTX lag {{plot_2}}% vs its window with BTC holding. Window: the next hour.")
+alertcondition(cheapFire, "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
+alertcondition(richFire, "Rich", "MSTX is over the rich line vs projection.")
+
+var table t = table.new(position.top_right, 2, 4, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
+if barstate.islast
+    W = color.white
+    table.cell(t, 0, 0, "MSTX", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 0, str.tostring(close, "#.##"), text_color=W, text_size=size.normal)
+    table.cell(t, 0, 1, "projected", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 1, str.tostring(projX, "#.##"), text_color=color.aqua, text_size=size.normal)
+    table.cell(t, 0, 2, "gap", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 2, str.tostring(gap, "#.##") + "%", text_color=gap <= cheapT ? color.lime : gap >= richT ? color.red : W, text_size=size.normal)
+    table.cell(t, 0, 3, "lag", text_color=W, text_size=size.normal)
+    table.cell(t, 1, 3, na(lag) ? "warming up" : str.tostring(lag, "#.##") + "%", text_color=not na(lag) and lag <= lagT ? color.aqua : W, text_size=size.normal)

@@ -62,7 +62,7 @@ def strategy_holdings(state):
 _state0 = load(STATE_FILE, {})
 _prev = dict(_state0.get("strategy_last") or {})
 _h, _s, HOLD_SRC = strategy_holdings(_state0)
-PINE_FILES = ["mstr_gap_lag.pine", "mstr_projected.pine"]
+PINE_FILES = ["mstr_gap_lag.pine", "mstr_projected.pine", "mstx_projected.pine"]
 def sync_pine(held, shares_m):
     """Rewrite the TradingView indicators' two default inputs so a re-paste carries the new holdings. Returns True if any changed."""
     import re
