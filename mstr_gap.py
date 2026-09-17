@@ -6,9 +6,10 @@ gap = MSTR / projected - 1.
 
 Three alerts:
   LAG    the gap falls past lag_threshold (config, -1.5% MSTR = -3.0% MSTX) below its own average over the previous
-         hour while BTC has held. The lag uses its OWN slope (config lag_slope 0.0125), not the projected price's 0.025:
-         0.0125 at a -3.0% MSTX line was the best hit rate tested (17 events in 60 days, 65% positive). Alex's call 9/17 (BTC's own hour move better than -1%), measured at MSTR's bar LOW, which is where
-         mstx_projected.pine measures it. Every bar since the previous run is scanned and the deepest one is judged, so
+         hour, while BTC has held (BTC's own hour move better than -1%), measured at MSTR's bar LOW, which is where
+         mstx_projected.pine measures it. The lag uses its OWN slope (config lag_slope 0.0125), not the projected
+         price's 0.025: 0.0125 at a -3.0% MSTX line was the best hit rate tested, 17 events in 60 days, 65% positive.
+         Alex's call, 9/17. Every bar since the previous run is scanned and the deepest one is judged, so
          a lag that lives in one minute is not missed by a five-minute poll. Cooldown 60 minutes. Readings past
          lag_watch (-1.0% MSTR = -2.0% MSTX) are written to the ledger without a push, so near misses are on the record.
          These three settings were wrong until 2026-09-17: the threshold was -1.5% MSTR, the measure was the close, and
@@ -16,12 +17,15 @@ Three alerts:
   CHEAP  MSTR is under the cheap line vs projection (config, -3% MSTR = -6% MSTX). Fires on the cross, again on each full
          point further, and hourly while it holds. Carries BTC's 50-day state as context (not a gate).
   RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence. NOT gated (rich_gate false since 9/17):
-         it declined with BTC both above and below its 50-day, and it measures the premium that triggers MSTR's ATM issuance.
+         it declined with BTC both above and below its 50-day. The push carries STRC's price and discount to par as plain
+         context; the read that a cheap STRC sharpens Rich was tested 9/17 and reversed under a non-circular framing.
   BAND   the ladder band on the monthly close (Kaim power-law quantile: under 15 MSTX, 15 to 50 MSTR, 50 to 85 IBIT, 85 and up
          the sell zone), pushed when a month's close moves it. The 50-day crossing, Cheap and Rich pushes carry the ladder plays
          (the site's data/ladder-rules.json is the written version).
   Every alert leads with MSTX vs projected MSTX (yesterday's close moved 2x MSTR's projected move), then MSTR.
-  Regime gate (config regime_gate, default on): Lag and Cheap push only with BTC above its 50-day; Rich only below. Muted alerts are still logged and scored.
+  Regime gate (config regime_gate, default on): Lag and Cheap push only with BTC above its 50-day, which is the rule
+  Alex stated for the BUY signals. Rich is NOT gated (rich_gate false): it declined in both regimes, and the
+  mirror-image rule was a symmetry assumption, never his. Muted alerts are still logged and scored.
 
 Holdings and the assumed diluted share count come from api.strategy.com/btc/bitcoinKpis on every run (btcHoldings and
 satsPerShare; this reproduces strategy.com/shares' ADSO exactly), so Monday's 8-K flows through by itself. Thresholds and the
@@ -353,14 +357,13 @@ def main():
     if g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01) and RICH_GATE and regime != "below":
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01):
-        # STRC's discount to par is the read on how strong this Rich is. At a discount MSTR can issue common and retire
-        # preferred well under 100, and that is where real supply comes from; near par the incentive is absent. Seven rich
-        # episodes so far: the only heavily dilutive one had STRC at 88, and every episode at or near par stayed accretive.
-        # One observation carries much of that, so this is shown as a read for Alex, never wired into the trigger.
-        if strc < 95: strc_read = "<b>Strong case.</b> STRC is cheap enough that issuing common to retire it beats buying BTC with the proceeds, and that supply is what pushes MSTR down."
-        elif strc < 97.5: strc_read = "<b>Middling case.</b> Some room to retire preferred at a discount, not much."
-        else: strc_read = "<b>Weak case.</b> STRC is at or near par, so little reason to issue common to retire it. Every rich episode that stayed accretive looked like this."
-        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>STRC $%.2f, %+.1f%% to par.</b> %s\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0, strc_read), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+        # STRC's price and discount to par ride along as context. No verdict attached: the read that a cheap STRC
+        # sharpens Rich was tested 9/17 and did not survive. It looked strong while STRC sat inside the target
+        # formula (-5.94% vs -1.71% excess at 10 days), and reversed once the signal was rebuilt on raw mNAV with
+        # no STRC in it (-4.36% vs -5.05%). The two extreme episodes went the wrong way too: STRC 88.22 was
+        # followed by MSTR beating BTC by 8.2 points, STRC 99.74 by losing 16.1. The arbitrage is real economics;
+        # it is not a detectable edge in fourteen months of price data.
+        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>STRC $%.2f, %+.1f%% to par.</b> %s\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
     # A near miss is data too. Without this the ledger only ever held alerts, so nothing that did not fire was on the
     # record and the file itself never got created (it 404'd to the site all week). At most one watch row per 30 minutes.
     if not fired and not math.isnan(lag_v) and lag_v <= LAG_WATCH:
