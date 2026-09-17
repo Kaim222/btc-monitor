@@ -11,7 +11,7 @@ lagT      = input.float(-1.5, "Lag alert (% vs the last hour)", step=0.1)
 cheapT    = input.float(-3.0, "Cheap line (% under projection)", step=0.5)
 richT     = input.float(4.0, "Rich line (% over projection)", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the hour, floor)", step=0.1)
-hourBars  = input.int(60, "Bars in the trailing hour", minval=10)
+hourMins  = input.int(60, "Trailing window (minutes)", minval=5)
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
 mstrSym   = input.symbol("NASDAQ:MSTR", "MSTR symbol")
 strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
@@ -34,6 +34,8 @@ bps    = btcHeld / (sharesM * 1e6)
 target = strcRule(strc) + slope * (btc - 75000) / 2500
 proj   = btc * bps * target
 gap    = (mstr / proj - 1) * 100
+// the window is measured in minutes so it means the same thing on 1, 5 and 15 minute charts
+hourBars = math.max(2, math.round(hourMins * 60 / timeframe.in_seconds()))
 hourAvg = ta.sma(gap[1], hourBars)
 lag    = gap - hourAvg
 btcHour = (btc / btc[hourBars] - 1) * 100
@@ -51,7 +53,7 @@ hline(lagT, "lag line", color=color.new(color.aqua, 60), linestyle=hline.style_d
 lagFire  = warm and lag <= lagT and btcHour >= btcHold and session.ismarket
 cheapFire = gap <= cheapT and session.ismarket
 richFire  = gap >= richT and session.ismarket
-bgcolor(lagFire ? color.new(color.aqua, 85) : na)
+bgcolor(lagFire ? color.new(color.aqua, 80) : cheapFire ? color.new(color.green, 92) : na)   // aqua = lag fired, faint green = under the cheap line
 
 alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its hour, BTC holding. Gap {{plot_0}}%. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTR {{plot_0}}% under projection (about 2x on MSTX). Swing line.")
