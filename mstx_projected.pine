@@ -4,7 +4,7 @@
 // where projected MSTR = BTC x (BTC held / ADSO) x target mNAV and target = STRC rule + slope x (BTC - 75,000) / 2,500.
 // gap  = MSTX vs projected MSTX, percent (the swing signal; needs the holdings inputs).
 // lag  = MSTX's own move over the trailing window minus leverage x BTC's target-adjusted move (the day-trade signal; no holdings needed).
-indicator("MSTX projected (Kaim)", shorttitle="MSTX proj", overlay=true)
+indicator("MSTX Projection", shorttitle="MSTX Projection", overlay=true)
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
