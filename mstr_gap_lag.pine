@@ -1,0 +1,66 @@
+//@version=6
+// MSTR gap and lag vs Alex's projected price. Put it on any 1-minute chart (MSTR or MSTX). Pulls MSTR and BTC itself.
+// projected MSTR = BTC x (BTC held / ADSO) x target mNAV, target = STRC rule + slope x (BTC - 75,000) / 2,500
+// gap = MSTR / projected - 1. lag = gap minus its average over the previous hour. Alerts: Lag (day trade), Cheap and Rich (swing).
+indicator("MSTR gap + lag (Kaim)", shorttitle="MSTR gap", overlay=false, format=format.percent, precision=2)
+
+btcHeld   = input.float(845050, "BTC held", step=1)
+sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
+slope     = input.float(0.0125, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+lagT      = input.float(-1.5, "Lag alert (% vs the last hour)", step=0.1)
+cheapT    = input.float(-3.0, "Cheap line (% under projection)", step=0.5)
+richT     = input.float(4.0, "Rich line (% over projection)", step=0.5)
+btcHold   = input.float(-1.0, "BTC must have held (% over the hour, floor)", step=0.1)
+hourBars  = input.int(60, "Bars in the trailing hour", minval=10)
+btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
+mstrSym   = input.symbol("NASDAQ:MSTR", "MSTR symbol")
+strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
+strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
+
+mstr = request.security(mstrSym, timeframe.period, close)
+btc  = request.security(btcSym, timeframe.period, close)
+strcLive = request.security(strcSym, "D", close)
+strc = strcMan > 0 ? strcMan : strcLive
+
+strcRule(s) =>
+    s >= 97.5 ? 0.90 :
+      s >= 95 ? 0.875 + (s - 95) * 0.01 :
+      s >= 92.5 ? 0.85 + (s - 92.5) * 0.01 :
+      s >= 87.5 ? 0.825 + (s - 87.5) * 0.005 :
+      s >= 82.5 ? 0.80 + (s - 82.5) * 0.005 :
+      math.max(0.775, 0.775 + (s - 77.5) * 0.005)
+
+bps    = btcHeld / (sharesM * 1e6)
+target = strcRule(strc) + slope * (btc - 75000) / 2500
+proj   = btc * bps * target
+gap    = (mstr / proj - 1) * 100
+hourAvg = ta.sma(gap[1], hourBars)
+lag    = gap - hourAvg
+btcHour = (btc / btc[hourBars] - 1) * 100
+// the trailing hour must not reach back across the overnight gap: arm only once the session has a full hour of bars
+sinceOpen = ta.barssince(session.isfirstbar)
+warm      = not na(sinceOpen) and sinceOpen >= hourBars
+
+plot(gap, "Gap vs projection (%)", color=color.new(color.orange, 0), linewidth=2)
+plot(lag, "Lag vs the last hour (%)", color=color.new(color.aqua, 0))
+hline(0, "zero", color=color.gray)
+hline(cheapT, "cheap line", color=color.new(color.green, 40), linestyle=hline.style_dotted)
+hline(richT, "rich line", color=color.new(color.red, 40), linestyle=hline.style_dotted)
+hline(lagT, "lag line", color=color.new(color.aqua, 60), linestyle=hline.style_dashed)
+
+lagFire  = warm and lag <= lagT and btcHour >= btcHold and session.ismarket
+cheapFire = gap <= cheapT and session.ismarket
+richFire  = gap >= richT and session.ismarket
+bgcolor(lagFire ? color.new(color.aqua, 85) : na)
+
+alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its hour, BTC holding. Gap {{plot_0}}%. Window: the next hour.")
+alertcondition(cheapFire, "Cheap", "MSTR {{plot_0}}% under projection (about 2x on MSTX). Swing line.")
+alertcondition(richFire, "Rich", "MSTR {{plot_0}}% over projection. Rich readings faded about 2% vs BTC over five days.")
+
+var table t = table.new(position.top_right, 2, 5, border_width=1, bgcolor=color.new(color.black, 20), frame_color=color.gray)
+if barstate.islast
+    table.cell(t, 0, 0, "MSTR", text_size=size.normal), table.cell(t, 1, 0, str.tostring(mstr, "#.##"), text_size=size.normal)
+    table.cell(t, 0, 1, "projected", text_size=size.normal), table.cell(t, 1, 1, str.tostring(proj, "#.##"), text_size=size.normal)
+    table.cell(t, 0, 2, "gap", text_size=size.normal), table.cell(t, 1, 2, str.tostring(gap, "#.##") + "%", text_size=size.normal, text_color=gap <= cheapT ? color.green : gap >= richT ? color.red : color.white)
+    table.cell(t, 0, 3, "lag (1h)", text_size=size.normal), table.cell(t, 1, 3, str.tostring(lag, "#.##") + "%", text_size=size.normal, text_color=lag <= lagT ? color.aqua : color.white)
+    table.cell(t, 0, 4, "on MSTX (2x)", text_size=size.normal), table.cell(t, 1, 4, str.tostring(gap * 2, "#.##") + "%", text_size=size.normal)

@@ -60,7 +60,25 @@ def strategy_holdings(state):
     if s: return float(s["btc_held"]), float(s["shares_m"]), "strategy.com cached %s" % s.get("fetched", "")[:16]
     return None, None, "none"
 _state0 = load(STATE_FILE, {})
+_prev = dict(_state0.get("strategy_last") or {})
 _h, _s, HOLD_SRC = strategy_holdings(_state0)
+PINE_FILE = "mstr_gap_lag.pine"
+def sync_pine(held, shares_m):
+    """Rewrite the TradingView indicator's two default inputs so a re-paste carries the new holdings. Returns True if changed."""
+    import re
+    if not os.path.exists(PINE_FILE): return False
+    src = open(PINE_FILE, encoding="utf-8").read()
+    new = re.sub(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held)), src)
+    new = re.sub(r'input\.float\([0-9.]+, "Assumed diluted shares \(M\)"', 'input.float(%.3f, "Assumed diluted shares (M)"' % shares_m, new)
+    if new != src:
+        open(PINE_FILE, "w", encoding="utf-8").write(new); return True
+    return False
+if _h and _s and "override" not in HOLD_SRC:
+    changed = sync_pine(_h, _s)
+    moved = _prev and (abs(float(_prev.get("btc_held", 0)) - _h) >= 1 or abs(float(_prev.get("shares_m", 0)) - _s) >= 0.001)
+    if moved:
+        send_pushover("Holdings changed", "Strategy now shows <b>%s BTC</b> over <b>%.3fM</b> assumed diluted shares (was %s / %.3fM). The site and this monitor already use the new numbers. Re-paste the TradingView indicator: its defaults are updated in the monitor repo (mstr_gap_lag.pine)." % (
+            format(int(_h), ","), _s, format(int(float(_prev.get("btc_held", 0))), ","), float(_prev.get("shares_m", 0))), sound="magic")
 if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_held"]), "config override"
 if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
 BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
