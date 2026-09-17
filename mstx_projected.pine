@@ -88,9 +88,11 @@ plot(close, "MSTX", color=color.new(color.orange, 0), linewidth=1)
 plot(projX, "Projected MSTX", color=color.new(color.aqua, 0), linewidth=1)
 plot(gap, "Gap (MSTX %)", color=color.new(color.orange, 0), display=display.none)    // hidden; shows in the legend
 plot(lag, "Lag (MSTX %)", color=color.new(color.aqua, 0), display=display.none)      // hidden; shows in the legend, feeds the alert text as plot_3
-// marks sit at the pane's edges so they never change its scale, in a pane or on the price chart
-plotshape(buyBar, "Buy", shape.triangleup, location.bottom, color=color.new(color.aqua, 0), text="BUY", textcolor=color.aqua, size=size.tiny)
-plotshape(sellBar, "Sell", shape.triangledown, location.top, color=color.new(color.red, 0), text="SELL", textcolor=color.red, size=size.tiny)
+// marks: a dot on the price line at the signal bar, plus an arrow with text just under or over the bar
+plot(buyBar ? close : na, "Buy dot", color=color.new(color.aqua, 0), style=plot.style_circles, linewidth=4)
+plot(sellBar ? close : na, "Sell dot", color=color.new(color.red, 0), style=plot.style_circles, linewidth=4)
+plotchar(buyBar, "Buy", "▲", location.belowbar, color=color.new(color.aqua, 0), text="BUY", textcolor=color.aqua, size=size.small)
+plotchar(sellBar, "Sell", "▼", location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.red, size=size.small)
 
 alertcondition(lagFire, "Lag", "MSTX lag {{plot_3}}% vs its window with BTC holding. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTX is under the cheap line vs projection. Swing signal.")
