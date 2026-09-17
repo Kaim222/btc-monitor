@@ -353,7 +353,14 @@ def main():
     if g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01) and RICH_GATE and regime != "below":
         state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; record("rich", muted=True); print("rich muted: BTC above its 50-day")
     elif g >= RICH_X and level_due("rich", g, lambda now, last: now >= last + 0.01):
-        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % regime, sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+        # STRC's discount to par is the read on how strong this Rich is. At a discount MSTR can issue common and retire
+        # preferred well under 100, and that is where real supply comes from; near par the incentive is absent. Seven rich
+        # episodes so far: the only heavily dilutive one had STRC at 88, and every episode at or near par stayed accretive.
+        # One observation carries much of that, so this is shown as a read for Alex, never wired into the trigger.
+        if strc < 95: strc_read = "<b>Strong case.</b> STRC is cheap enough that issuing common to retire it beats buying BTC with the proceeds, and that supply is what pushes MSTR down."
+        elif strc < 97.5: strc_read = "<b>Middling case.</b> Some room to retire preferred at a discount, not much."
+        else: strc_read = "<b>Weak case.</b> STRC is at or near par, so little reason to issue common to retire it. Every rich episode that stayed accretive looked like this."
+        send_pushover("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH, sell.</b> BTC is %s its 50-day. Rich readings faded about 2%% vs BTC over five days in the backtest.\n<b>STRC $%.2f, %+.1f%% to par.</b> %s\n<b>Play:</b> sell what you hold, or a short vertical from the swing sleeve. No new primary while Rich is on; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0, strc_read), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
     # A near miss is data too. Without this the ledger only ever held alerts, so nothing that did not fire was on the
     # record and the file itself never got created (it 404'd to the site all week). At most one watch row per 30 minutes.
     if not fired and not math.isnan(lag_v) and lag_v <= LAG_WATCH:
