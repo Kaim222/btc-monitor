@@ -1,0 +1,197 @@
+{
+ "sections": [
+  {
+   "name": "LAG (day trade)",
+   "lines": "mstr_gap.py 312-342",
+   "shows": "MSTR's gap fell past lag_threshold (-1.5% MSTR = -3.0% MSTX) below its own trailing-hour average, measured at the bar LOW, while BTC's own hour move held above -1%. Scans every bar since last_bar and judges the deepest qualifying one. 60-minute cooldown. Muted when BTC is below its 50-day (regime_gate true).",
+   "source": "1-minute MSTR/BTC/MSTX bars from yfinance; lag_slope 0.0125 from the live ladder-site config; thresholds lag_threshold -0.015, btc_hour_move_floor -0.01",
+   "verdict": "keep",
+   "reason": "The only alert with a measured edge behind it (17 events in 60 days, 65% positive) and the one Alex actually traded on 9/17. It is the core of the system. It needs fixes, not removal.",
+   "duplicates": "",
+   "stale_or_hardcoded": "Structurally blind for the first 30 minutes of every session. Reproduced: hour_avg = gap_lag.shift(1).rolling(60, min_periods=30) makes lag NaN until bar 31, so the earliest possible Lag is 10:00 NY, and line 264 (len(df) < 20 -> return) suppresses everything before ~9:50. Line 320 then fills btc_hour with 0.0, disabling the BTC-held floor entirely before 10:30.",
+   "merge_into": ""
+  },
+  {
+   "name": "CHEAP (swing trade)",
+   "lines": "mstr_gap.py 343-356 (level_due 344-348)",
+   "shows": "MSTX gap at or below -6% (cheap_threshold -0.03 doubled). Fires on the cross, again on each full point further, otherwise at most hourly while it holds. Muted when BTC is below its 50-day.",
+   "source": "Same bar set; cheap_threshold from the live config; gap_x computed off yesterday's MSTX close and the projected MSTR move x2",
+   "verdict": "keep",
+   "reason": "Distinct trigger, distinct sleeve, distinct play from Lag. Not redundant with anything.",
+   "duplicates": "",
+   "stale_or_hardcoded": "Line 351 writes last_cheap_alert and last_cheap_gap on the MUTED path, starting the cooldown from an event that never reached him. Bounded in practice because the regime comes from the completed daily close and cannot flip mid-session.",
+   "merge_into": ""
+  },
+  {
+   "name": "RICH (sell)",
+   "lines": "mstr_gap.py 357-366",
+   "shows": "MSTX gap at or above +8% (rich_threshold 0.04 doubled). Same cross / full-point / hourly cadence. Not gated: rich_gate is false in the live config, so the mute branch at 357-358 is dead code.",
+   "source": "Same bar set; rich_threshold from the live config; STRC price from yfinance rides along as context",
+   "verdict": "keep",
+   "reason": "Distinct signal with a stated mechanism (premium to NAV triggers ATM issuance). Keep it. The 9/18 fix restored it; nothing else about it is wrong.",
+   "duplicates": "",
+   "stale_or_hardcoded": "The dead mute branch at 357-358 should go with rich_gate; it is one more place an exception can land and it can never run while rich_gate is false."
+  },
+  {
+   "name": "BAND — ladder band on the monthly close",
+   "lines": "mstr_gap.py 215-231",
+   "shows": "Runs the prior month's last daily BTC close through the Kaim power-law quantile and pushes when the band moves (under 15 MSTX, 15-50 MSTR, 50-85 IBIT, 85+ sell zone). Carries the band's PMCC structure and the 90-day band-line price.",
+   "source": "BTC-USD daily closes (130d) from yfinance; band constants hardcoded at lines 127-128, matching the site",
+   "verdict": "keep",
+   "reason": "This is the version that matches Alex's stated rule (band moves on the monthly close, agreed 9/17). It fires at most once a month and carries the rotation instruction. Keep this one and delete its competitor.",
+   "duplicates": "monitor.py's rotation alert (monitor.py 216-263) fires the same instruction off the LIVE spot quantile every 15 minutes, 24/7, with a 1.0q hysteresis buffer.",
+   "stale_or_hardcoded": ""
+  },
+  {
+   "name": "BTC 50-day crossing (the gate)",
+   "lines": "mstr_gap.py 232-246",
+   "shows": "BTC's completed daily close crossing its 50-day SMA, pushed once on the flip. Turns the Lag and Cheap gate on or off and carries the play for the new state.",
+   "source": "BTC-USD daily closes, completed UTC days only (line 212 excludes today), 50-day mean at line 213",
+   "verdict": "keep",
+   "reason": "It is the gate every other buy signal reads. Cheap to run, fires a handful of times a year, no overlap with anything.",
+   "duplicates": "",
+   "stale_or_hardcoded": "Runs on the 15,45 * * * * cron which GitHub delivers about twice an hour but with 10-25 minutes of drift, so the crossing arrives up to an hour after the 00:00 UTC close. Acceptable for a daily-close rule."
+  },
+  {
+   "name": "HOLDINGS CHANGED",
+   "lines": "mstr_gap.py 164-170 (module level, before main)",
+   "shows": "Strategy's btcHoldings or satsPerShare moved since the last run. Pushes the new numbers and tells him to re-paste the TradingView indicator.",
+   "source": "api.strategy.com/btc/bitcoinKpis, sanity-checked at line 68 (held > 100,000 and 100 < shares_m < 5,000)",
+   "verdict": "merge",
+   "reason": "It is an FYI, not a trade. It does not need its own push at 3am, and it is currently the single most dangerous line in the file: it runs at import, outside main, outside any guard, so a Pushover timeout or a bad API value there kills the 50-day check and all three market alerts for that run. Fold the two numbers into the footer of the next market-hours push and delete the standalone alert.",
+   "duplicates": "",
+   "stale_or_hardcoded": "Because state is only persisted when the job reaches the commit step, a run that crashes after this push leaves _prev stale and the same push repeats on the next run.",
+   "merge_into": "the `core` block (mstr_gap.py 295-301) that every Lag/Cheap/Rich push already carries"
+  },
+  {
+   "name": "WATCH rows (ledger only, no push)",
+   "lines": "mstr_gap.py 367-373",
+   "shows": "A lag reading past lag_watch (-1.0% MSTR) that did not fire. Written to mstr_ledger.json, at most one per 30 minutes. No notification.",
+   "source": "Same lag computation",
+   "verdict": "keep",
+   "reason": "Silent by design and it is the evidence base the lag threshold rests on. It adds zero noise. Keep it.",
+   "duplicates": "",
+   "stale_or_hardcoded": "It sits AFTER the Rich push in the sequence, so today's five Rich crashes discarded every watch row those runs would have written."
+  },
+  {
+   "name": "TEST push",
+   "lines": "mstr_gap.py 203-207 (workflow_dispatch input at mstr_gap.yml 8-12, 40)",
+   "shows": "One message confirming wiring, holdings source and thresholds. Manual only.",
+   "source": "Config and holdings, no market data",
+   "verdict": "keep",
+   "reason": "It is the only delivery check that exists. Keep it, and make it exercise the real alert sounds rather than the default.",
+   "duplicates": "",
+   "stale_or_hardcoded": "It sends on the send_pushover default sound (cashregister) at priority 0. Today's 16:14 test proves the token and user key work; it does NOT prove that siren (Lag), bike (Band, 50-day) or magic (Holdings) are audible on his device."
+  },
+  {
+   "name": "BAND ROTATION on live spot — monitor.py",
+   "lines": "monitor.py 216-263 (send at 254, hysteresis 246-249, message 135-161); workflow .github/workflows/monitor.yml",
+   "shows": "The live BTC spot quantile crossing a band boundary by more than 1.0 quantile point. Every 15 minutes, 24/7.",
+   "source": "CoinGecko spot with a Coinbase fallback; its own state file state.json (currently band 'MSTX PMCC', quantile 11.44)",
+   "verdict": "cut",
+   "reason": "Three independent reasons. (1) It duplicates the BAND alert on a trigger Alex's own 9/17 rules say is wrong: the band moves on the monthly close, not on an intraday touch. (2) Its payload is the retired 4-tier ladder (MSTR PMCC long 9mo / short 6mo, STRC on 1.5x margin) and contradicts the structures mstr_gap.py sends for the same band (long 12 months at 0.75 delta, short 90 days at the band ceiling). (3) If it ever fires it also moves its own state, so it would push a rotation Alex should not take AND could then be out of sync with the monthly-close version. It is pure noise with a wrong-answer failure mode.",
+   "duplicates": "mstr_gap.py 215-231, the monthly-close BAND alert, which is the correct version",
+   "stale_or_hardcoded": "LADDER at monitor.py 32-41 and LEGACY_MAP at 44-51 are the old 6-tier/4-tier scheme. HYST = 1.0 at line 30. Its commit step (monitor.yml 29-35) is a bare git push with no fetch, retry or if: always(); it lost the race today at 18:47 (run 35382188076, '! [rejected] main -> main (fetch first)')."
+  }
+ ],
+ "defects": [
+  {
+   "severity": "high",
+   "where": ".github/workflows/mstr_gap.yml 46 and monitor.yml 29 — no `if: always()` on the commit step, and no failure notification anywhere in either workflow",
+   "what": "Nothing tells Alex when the pipeline is down. When the python step exits non-zero, GitHub skips every later step, so the state commit never runs and the failure leaves no trace outside the Actions tab. CONFIRMED: five runs failed today between 19:22 and 19:53 UTC (ids 35385593326, 35385838524, 35387665956, 35388059578, 35388474360) and `git log` has no `mstr state` commit at any of those times. This is the meta-defect behind his whole complaint: a crashing monitor and a quiet market look identical from the phone. Fix: an `if: failure()` step that sends a Pushover, plus a daily heartbeat so silence is provably silence."
+  },
+  {
+   "severity": "high",
+   "where": "mstr_gap.py 199-383 — main() is one unprotected sequence",
+   "what": "The first exception kills every alert after it, plus the ledger write and the state save. Today's Rich TypeError at line 366 aborted before the watch-row block (367-373), the ledger write (374-377) and the state save (378-382) on five consecutive runs. Order is Lag, then Cheap, then Rich, then watch, then state: a crash in Lag silently kills Cheap and Rich too. Fix: wrap each alert in its own try/except, save state in a `finally`."
+  },
+  {
+   "severity": "high",
+   "where": "mstr_gap.py 172-176 (`bars` raises RuntimeError on an empty frame) and 265 (`strc = ...iloc[-1]`)",
+   "what": "Two unguarded single points of failure sit upstream of all three market alerts with no fallback. An empty yfinance frame for MSTR, BTC, MSTX or STRC aborts the run before Lag, Cheap and Rich are ever evaluated. yfinance rate-limiting from GitHub Actions IP ranges is the common trigger and would produce exactly the symptom he reports. mstr_state.json already caches `strc` (98.56) and the code never falls back to it."
+  },
+  {
+   "severity": "high",
+   "where": "mstr_gap.py 164-170 — the holdings push runs at module import, before main(), outside any guard",
+   "what": "A Pushover timeout or 5xx on this one call kills the entire script before the 50-day check and every market alert. Because state is only persisted if the job reaches the commit step, `_prev` stays stale after such a crash, so the next run re-attempts the same push and can die the same way: a self-sustaining outage that needs no bad market data at all. The same path also rewrites all three .pine files (sync_pine, line 166) from whatever the API returned."
+  },
+  {
+   "severity": "high",
+   "where": ".github/workflows/mstr_gap.yml 34 — `pip install -q yfinance pandas`, unpinned",
+   "what": "A yfinance or pandas release can break the monitor overnight with no warning and no alert. This is not hypothetical: every run today logged `Pandas4Warning: Sorting by default when concatenating all DatetimeIndex is deprecated` at mstr_gap.py 254. When pandas 4 stops sorting, the concat index this code slices with `df[df.index > last_bar]` and `df.tail()` is no longer guaranteed sorted, and the lag scan starts reading the wrong bars — silently, with no exception. Runner pandas is already 3.0.2."
+  },
+  {
+   "severity": "high",
+   "where": "monitor.py 216-263 running alongside mstr_gap.py 215-231",
+   "what": "Two band-rotation alerts with different triggers, different state files and contradictory payloads. monitor.py fires on the live spot quantile with a 1.0q buffer every 15 minutes; Alex's stated rule is the monthly close. Live q is 11.44 against a 16.0 trigger, so it is armed. If BTC rallies into the MSTR band intraday it pushes a rotation he should not take, in the retired 4-tier ladder's language (9mo/6mo PMCC, STRC on 1.5x margin), and moves its own state so the two versions diverge."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 154-162 (`send_pushover`) and monitor.py 165-181",
+   "what": "No `priority` parameter on any push in either script. Priority 0 is silenced by Pushover's quiet hours and filtered by iOS Focus modes. The Lag alert carries a 60-minute exit and 'never hold to the close' and is the one that must bypass both. Separately, today's successful --test push used the default sound (cashregister); it proves the token and user key work, but it does NOT prove `siren` (Lag), `bike` (Band and 50-day) or `magic` (Holdings) are audible, and a per-app or per-device sound override in the Pushover app would silence all of them. That is checkable only on his phone, not in this repo."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 154-162 — no retry on the Pushover call",
+   "what": "`urlopen(..., timeout=10)` with no retry and no record of a failed send. One Pushover timeout or 5xx and that alert is gone permanently, the ledger never records it, and the exception takes the rest of the run's alerts and the state save with it."
+  },
+  {
+   "severity": "medium",
+   "where": ".github/workflows/mstr_gap.yml 5 — `*/5 13-21 * * 1-5`",
+   "what": "The real cadence is roughly half what the cron promises. MEASURED over 52 market-hours scheduled runs (9/15-9/18): 6 to 8 runs per hour against the 12 the cron asks for, median gap 8.2 minutes, mean 8.2, max 25.7 (17:57:19 -> 18:23:03 today). GitHub drops high-frequency schedules under load. For a signal that lives in single minutes this is the difference between the documented design and what actually runs."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 318 — `if len(scan) < 2 or len(scan) > 30: scan = df.tail(6)`",
+   "what": "A gap over 31 minutes between runs silently discards everything but the last 6 minutes of bars, for the one alert that exists because a signal can live in a single minute. Not yet observed from cron alone (0 of 50 observed gaps reached 31; max 25.7), but the crash path compounds it: a failed run never advances `last_bar`, so today's five-failure streak left `last_bar` pinned at 15:36 while runs continued to 15:53. A 25-minute cron gap on top of a short crash streak clears 31 minutes easily. The fallback should widen the scan, not shrink it to 6."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 264 and 281",
+   "what": "The Lag alert cannot fire in the first 30 minutes of any session. REPRODUCED: `gap_lag.shift(1).rolling(60, min_periods=30)` leaves `lag` NaN through bar 30, so the first usable bar is 10:00 NY; line 264 (`if len(df) < 20: return`) suppresses everything before ~9:50 on top of that. The open is the most dislocated part of the day and the system is blind through all of it."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 320 — `scan[\"btc_hour\"] = scan[\"btc_hour\"].fillna(0.0)`",
+   "what": "Between 10:00 and 10:30 NY the BTC-held floor is disabled, because BTC has no full hour of bars yet and the NaN is filled with 0.0 (treated as 'BTC flat'). A Lag can fire in that window while BTC is falling hard, which is precisely the condition `btc_hour_move_floor` exists to exclude. A false ping is as corrosive to trust as a missed one."
+  },
+  {
+   "severity": "medium",
+   "where": "mstr_gap.py 228-231 and 242-244, combined with the missing `if: always()`",
+   "what": "Duplicate-alert path. The band push and the 50-day crossing push each write state immediately after sending, but that write only survives if the job reaches the commit step. A crash later in the same run (line 252 bars, line 265 STRC, line 366 Rich) discards it, so the crossing or band push fires again on the next run. Today's Rich crash sat downstream of both."
+  },
+  {
+   "severity": "medium",
+   "where": ".github/workflows/monitor.yml 29-35",
+   "what": "A bare `git push` with no fetch, no retry and no `if: always()`, against a repo the other workflow commits to every few minutes. CONFIRMED failing today at 18:47 (run 35382188076: `! [rejected] main -> main (fetch first)`). When it loses, state.json does not advance, so a rotation that already pushed would push again on the next run. The gap monitor's commit step (mstr_gap.yml 46-69) already solves this properly with keep-copy, reset, ledger merge and three retries; monitor.yml never got the fix."
+  },
+  {
+   "severity": "low",
+   "where": "mstr_gap.py 338, 351, 358",
+   "what": "The muted paths write `last_lag_alert` / `last_cheap_alert` / `last_rich_alert`, starting the cooldown from an alert that never reached him. Impact is bounded because the regime is computed from the completed daily close and so cannot flip mid-session, but it is still a cooldown counting events he never saw."
+  },
+  {
+   "severity": "low",
+   "where": "merge_ledger.py 43",
+   "what": "`if merged.get(k) is None or k not in merged` — the second clause is unreachable, and any non-None value already present is never replaced. A row carrying `muted: false` that races the same row carrying `muted: true` keeps whichever arrived first, so the ledger can record a muted alert as live."
+  },
+  {
+   "severity": "low",
+   "where": "state.json vs mstr_state.json; mstr_state.local.json; monitor_v6tier_backup.py",
+   "what": "Two band vocabularies in two state files with nothing reconciling them ('MSTX PMCC' at quantile 11.44 vs 'MSTX' at 10.6), plus two dead files in the repo. Cutting monitor.py removes state.json, monitor.yml, monitor_v6tier_backup.py and this confusion in one move. mstr_state.local.json is also stale (last touched 9/17)."
+  }
+ ],
+ "minimal_layout": [
+  "LAG — keep. The only alert with measured evidence behind it and the one he trades. Fix the warm-up so it is live from 9:35 rather than 10:00, keep the BTC floor honest before 10:30, widen the scan fallback instead of shrinking it to 6 bars, and send it at Pushover priority 1 so it bypasses quiet hours.",
+  "CHEAP — keep as is. Distinct trigger, distinct sleeve, distinct play.",
+  "RICH — keep as is now that the format string is fixed. Delete the dead rich_gate mute branch at lines 357-358.",
+  "BAND on the monthly close — keep. This is the version that matches his own rules. It fires at most once a month.",
+  "BTC 50-day crossing — keep. It is the gate the buy signals read, a handful of pushes a year.",
+  "MONITOR DOWN — add. One `if: failure()` step in each workflow plus a daily heartbeat. Right now silence and a dead pipeline are indistinguishable, which is the actual reason he does not trust it.",
+  "HOLDINGS CHANGED — stop pushing it. Fold the two numbers into the footer of the next market-hours alert. Move the strategy.com call inside main() and inside a try so it can never take the run down.",
+  "WATCH rows — keep, ledger only, no push. Zero noise, and it is the evidence the lag threshold rests on.",
+  "TEST — keep, and make it fire on the real alert sounds so it actually proves what he thinks it proves.",
+  "CUT ENTIRELY: monitor.py, monitor.yml, state.json, monitor_v6tier_backup.py, mstr_state.local.json. That removes the duplicate band alert, its wrong trigger, its contradictory 4-tier payload, a second state file, a failing push step and a second workflow — for no loss of coverage."
+ ],
+ "summary": "Nine alert types exist across two workflows; the minimal set is six. Can each fire today, as the code stands after this morning's Rich fix: LAG — yes, but only between 10:00 and 16:00 NY (reproduced: the trailing-hour average needs 30 bars, so the first 30 minutes of every session are blind), only on a run that happens to land, and only with BTC above its 50-day, which it is. CHEAP — yes; needs the MSTX gap at or below -6% and it is currently +7.7%, so not close. RICH — yes, and it is the likely next one: the gap is 7.74% against an 8.0% line. Before this morning it could not fire at all, because it raised TypeError every single time it was due; it did so five times between 15:22 and 15:53 ET today. BAND on the monthly close — no, not until 1 October at the earliest; August closed at quantile 10.6, still MSTX. 50-DAY CROSSING — evaluated on every run 24/7, fires only on a flip; BTC is above, so not today. HOLDINGS — yes on any run where Strategy's API moves; unchanged at 845,050 BTC over 450.112M shares. MONITOR.PY BAND ROTATION — yes, and it should not be able to: it is armed at live quantile 11.44 against a 16.0 trigger, and if it fires it pushes a rotation off an intraday touch, which is not his rule, in the retired 4-tier ladder's language.\n\nThe Rich crash was the symptom, not the disease. Three things make alerts disappear without a trace. First, nothing tells him the monitor is down: neither workflow has an `if: failure()` step, and the commit step has no `if: always()`, so a crashed run skips the state save and leaves no trace outside the Actions tab (confirmed — five failed run ids today, and no `mstr state` commit at any of those timestamps). Second, main() is one unprotected sequence, so the first exception kills every alert after it plus the ledger write and the state save; today's Rich error at line 366 took the watch rows, the ledger and the state with it, five runs in a row. Third, three unguarded single points of failure sit upstream of everything — the yfinance `bars()` call, the STRC fetch at line 265 (the state already caches a usable value and never falls back to it), and the holdings push at line 165, which runs at module import before main() and can kill an entire run on one Pushover timeout.\n\nTwo more things he should check that the code cannot answer. No push in either script sets a Pushover priority, so everything goes out at priority 0, which Pushover's quiet hours silence and iOS Focus filters — and the Lag alert has a 60-minute exit, so it is the one that must bypass both. And this morning's successful test push went out on the default `cashregister` sound; it proves the token works, but it does not prove `siren` (Lag) or `bike` (Band and 50-day) are audible on his phone. Finally, the schedule is not what the file says: the `*/5` cron promises 12 runs an hour and GitHub delivers 6 to 8, median gap 8.2 minutes, longest observed today 25.7 minutes, measured across 52 market-hours runs."
+}

@@ -40,7 +40,8 @@ def merge(remote, ours):
         for k, v in row.items():
             if v is None:
                 continue
-            if merged.get(k) is None or k not in merged:
+            # Fill null fields from the other row; retain first-seen non-null values, including muted.
+            if merged.get(k) is None:
                 merged[k] = v
     out = [by_key[k] for k in order]
     out.sort(key=lambda r: str(r.get("time") or ""))

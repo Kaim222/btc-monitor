@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout repo
@@ -31,7 +32,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install
-        run: pip install -q yfinance pandas
+        # Bump yfinance deliberately after testing; pandas 3 is supported.
+        run: pip install -q yfinance==1.7.0 pandas
 
       - name: Run MSTR gap monitor
         env:
@@ -44,6 +46,7 @@ jobs:
       # The ledger is append-only, so it is unioned with main rather than overwritten.
       # A lost race retries; if it still cannot push, the job still succeeds, because the alert has already been sent.
       - name: Commit updated state
+        if: always()
         run: |
           set -u
           git config user.name  "btc-monitor"
@@ -67,3 +70,22 @@ jobs:
           done
           echo "state not pushed after 3 tries; the alert itself already went out"
           exit 0
+
+      - name: Notify first failure in a streak
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          previous=$(gh run list --workflow mstr_gap.yml --status completed --limit 1 --json conclusion --jq '.[0].conclusion // ""')
+          if [ "$previous" = "success" ]; then
+            curl --fail-with-body --silent --show-error --max-time 30 \
+              --data-urlencode "token=$PUSHOVER_TOKEN" \
+              --data-urlencode "user=$PUSHOVER_USER" \
+              --data-urlencode "title=Monitor down" \
+              --data-urlencode "message=Monitor run failed: $RUN_URL" \
+              https://api.pushover.net/1/messages.json
+          fi
