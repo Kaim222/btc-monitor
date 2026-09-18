@@ -46,5 +46,20 @@
     "btc_60m": 0.49,
     "rel_60m": 1.66,
     "scored": true
+  },
+  {
+    "kind": "rich",
+    "muted": false,
+    "time": "2026-09-18T15:15:00-04:00",
+    "mstr": 153.22,
+    "btc": 81223.09,
+    "proj": 146.73,
+    "gap": 4.42,
+    "lag": null,
+    "regime": "above",
+    "mstx": 18.62,
+    "proj_mstx": 17.24,
+    "gap_mstx": 8.03,
+    "note": "backfilled 9/18: Rich was due from this bar, but the push crashed on a format-string bug on five runs (15:22 to 15:53 ET), so nothing was sent or logged. Fixed the same day."
   }
 ]
