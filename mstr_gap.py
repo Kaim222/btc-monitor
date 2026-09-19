@@ -431,7 +431,9 @@ def main():
         state.update({"last_run": now.isoformat(), "last_bar": t.isoformat(), "mstr": round(float(r["MSTR"]), 2), "btc": round(btc_last), "strc": round(strc, 2),
                       "gap": round(100 * float(r["gap"]), 2), "lag": None if math.isnan(r["lag"]) else round(100 * float(r["lag"]), 2), "regime": regime, "fired": fired,
                       "mstx": round(float(r["MSTX"]), 2), "proj_mstx": round(float(r["proj_x"]), 2), "gap_mstx": round(100 * float(r["gap_x"]), 2),
-                      "inputs": cfg["_source"], "holdings": HOLD_SRC, "btc_held": BTC_HELD, "shares_m": round(SHARES_M, 3)})
+                      "inputs": cfg["_source"], "holdings": HOLD_SRC, "btc_held": BTC_HELD, "shares_m": round(SHARES_M, 3),
+                      # yesterday's closes, the base of the projected MSTX mapping, so the site never needs its own copy
+                      "prev_day": prev.index[-1].date().isoformat() if len(prev) else None, "prev_mstr": round(mstr_prev, 2), "prev_mstx": round(mstx_prev, 2)})
         print("fired: %s" % (fired or "nothing"))
     loaded = set()
     try:
