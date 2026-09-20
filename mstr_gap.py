@@ -19,7 +19,7 @@ Three alerts:
   RICH   MSTR is over the rich line (config, +4% MSTR = +8% MSTX). Same cadence. NOT gated (rich_gate false since 9/17):
          it declined with BTC both above and below its 50-day. The push carries STRC's price and discount to par as plain
          context; the read that a cheap STRC sharpens Rich was tested 9/17 and reversed under a non-circular framing.
-  BAND   the ladder band on the monthly close (Kaim power-law quantile: under 15 MSTX, 15 to 50 MSTR, 50 to 85 IBIT, 85 and up
+  BAND   the ladder band on the monthly close (Kaim power-law quantile: under 10 MSTX, 10 to 60 MSTR, 60 to 75 IBIT, 75 and up
          the sell zone), pushed when a month's close moves it. The 50-day crossing, Cheap and Rich pushes carry the ladder plays
          (the site's data/ladder-rules.json is the written version).
   Every alert leads with MSTX vs projected MSTX (yesterday's close moved 2x MSTR's projected move), then MSTR.
@@ -146,11 +146,13 @@ def ladder_price(q, ts):
     for (hq, ho), (lq, lo) in zip(bs, bs[1:]):
         if lq <= q <= hq: return fair_value(ts) * 10 ** (lo + (q - lq) / (hq - lq) * (ho - lo))
     return float("nan")
-def ladder_band(q): return "MSTX" if q < 15 else "MSTR" if q < 50 else "IBIT" if q < 85 else "sell zone"
-BAND_LINE = {"MSTX": 15, "MSTR": 50, "IBIT": 85}          # the band ceiling, where the short goes and the rotation triggers
-BAND_PLAY = {"MSTX": "MSTX PMCC: long 12 months at 0.75 delta, short 90 days at the 15 line, rolled.",
-             "MSTR": "MSTR PMCC: long 12 months at 0.75 delta, short 90 days at the 50 line, rolled.",
-             "IBIT": "IBIT PMCC: long 12 months at 0.75 delta, short 90 days at the 85 line, rolled. Rich readings here are the sell.",
+LADDER_LINES = (10, 60, 75)          # moved from 15 / 50 / 85 on 2026-09-20 after the cut-point study on real prices since 2020
+LINES_TXT = " / ".join(str(x) for x in LADDER_LINES)
+def ladder_band(q): return "MSTX" if q < LADDER_LINES[0] else "MSTR" if q < LADDER_LINES[1] else "IBIT" if q < LADDER_LINES[2] else "sell zone"
+BAND_LINE = {"MSTX": LADDER_LINES[0], "MSTR": LADDER_LINES[1], "IBIT": LADDER_LINES[2]}          # the band ceiling, where the short goes and the rotation triggers
+BAND_PLAY = {"MSTX": "MSTX PMCC: long 12 months at 0.75 delta, short 90 days at the %d line, rolled." % LADDER_LINES[0],
+             "MSTR": "MSTR PMCC: long 12 months at 0.75 delta, short 90 days at the %d line, rolled." % LADDER_LINES[1],
+             "IBIT": "IBIT PMCC: long 12 months at 0.75 delta, short 90 days at the %d line, rolled. Rich readings here are the sell." % LADDER_LINES[2],
              "sell zone": "Sell the BTC beta into it and rotate down; the proceeds sit in STRC."}
 
 def send_pushover(title, message, sound="cashregister", priority=0):
@@ -250,7 +252,13 @@ def main():
             if len(mclose) and (m0 - mclose.index[-1]) <= pd.Timedelta(days=1):
                 m_end, m_px = (m0 - pd.Timedelta(milliseconds=1)).to_pydatetime(), float(mclose.iloc[-1])
                 q_m = ladder_q(m_px, m_end); band_now = ladder_band(q_m); prev_band = state.get("band")
-                if prev_band and band_now != prev_band:
+                if prev_band and state.get("band_lines") != LINES_TXT and state.get("band_close") == m_end.strftime("%Y-%m-%d"):
+                    push("Ladder lines: %s" % LINES_TXT, "The ladder lines moved to <b>%s</b>: MSTX under %d, MSTR %d to %d, IBIT %d to %d, the sell zone %d and up.\n"
+                         "The %s monthly close, $%s, is ladder quantile <b>%.1f</b>, so the band is <b>%s</b> (it read %s on the old lines). No monthly close crossed a line.\n<b>Play:</b> %s" % (
+                         LINES_TXT, LADDER_LINES[0], LADDER_LINES[0], LADDER_LINES[1], LADDER_LINES[1], LADDER_LINES[2], LADDER_LINES[2],
+                         m_end.strftime("%b %Y"), format(round(m_px), ","), q_m, band_now, prev_band, BAND_PLAY[band_now]), sound="bike")
+                    if band_now != prev_band: state["band_changed"] = now.isoformat()
+                elif prev_band and band_now != prev_band:
                     line = BAND_LINE.get(band_now)
                     line_px = ladder_price(line, utc_now + timedelta(days=90)) if line else float("nan")
                     msg = ("The <b>%s</b> monthly close, $%s, is ladder quantile <b>%.1f</b>: the band moved from %s to <b>%s</b>.\n<b>Play:</b> %s%s\n"
@@ -260,7 +268,7 @@ def main():
                            regime_now))
                     push("Ladder band: %s" % band_now, msg, sound="bike")
                     state["band_changed"] = now.isoformat()
-                state["band"], state["band_q"], state["band_close"] = band_now, round(q_m, 1), m_end.strftime("%Y-%m-%d")
+                state["band"], state["band_q"], state["band_close"], state["band_lines"] = band_now, round(q_m, 1), m_end.strftime("%Y-%m-%d"), LINES_TXT
         except Exception as exc:
             failed('band', exc)
         try:

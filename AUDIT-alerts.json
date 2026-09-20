@@ -34,9 +34,9 @@
   },
   {
    "name": "BAND — ladder band on the monthly close",
-   "lines": "mstr_gap.py 215-231",
-   "shows": "Runs the prior month's last daily BTC close through the Kaim power-law quantile and pushes when the band moves (under 15 MSTX, 15-50 MSTR, 50-85 IBIT, 85+ sell zone). Carries the band's PMCC structure and the 90-day band-line price.",
-   "source": "BTC-USD daily closes (130d) from yfinance; band constants hardcoded at lines 127-128, matching the site",
+   "lines": "mstr_gap.py 250-273",
+   "shows": "Runs the prior month's last daily BTC close through the Kaim power-law quantile and pushes when the band moves (under 10 MSTX, 10-60 MSTR, 60-75 IBIT, 75+ sell zone). Carries the band's PMCC structure and the 90-day band-line price.",
+   "source": "BTC-USD daily closes (130d) from yfinance; ladder lines are LADDER_LINES at line 149, matching the site; the fitted quantile bands are _BANDS at line 130 and did not move",
    "verdict": "keep",
    "reason": "This is the version that matches Alex's stated rule (band moves on the monthly close, agreed 9/17). It fires at most once a month and carries the rotation instruction. Keep this one and delete its competitor.",
    "duplicates": "monitor.py's rotation alert (monitor.py 216-263) fires the same instruction off the LIVE spot quantile every 15 minutes, 24/7, with a 1.0q hysteresis buffer.",
@@ -90,7 +90,7 @@
    "source": "CoinGecko spot with a Coinbase fallback; its own state file state.json (currently band 'MSTX PMCC', quantile 11.44)",
    "verdict": "cut",
    "reason": "Three independent reasons. (1) It duplicates the BAND alert on a trigger Alex's own 9/17 rules say is wrong: the band moves on the monthly close, not on an intraday touch. (2) Its payload is the retired 4-tier ladder (MSTR PMCC long 9mo / short 6mo, STRC on 1.5x margin) and contradicts the structures mstr_gap.py sends for the same band (long 12 months at 0.75 delta, short 90 days at the band ceiling). (3) If it ever fires it also moves its own state, so it would push a rotation Alex should not take AND could then be out of sync with the monthly-close version. It is pure noise with a wrong-answer failure mode.",
-   "duplicates": "mstr_gap.py 215-231, the monthly-close BAND alert, which is the correct version",
+   "duplicates": "mstr_gap.py 250-273, the monthly-close BAND alert, which is the correct version",
    "stale_or_hardcoded": "LADDER at monitor.py 32-41 and LEGACY_MAP at 44-51 are the old 6-tier/4-tier scheme. HYST = 1.0 at line 30. Its commit step (monitor.yml 29-35) is a bare git push with no fetch, retry or if: always(); it lost the race today at 18:47 (run 35382188076, '! [rejected] main -> main (fetch first)')."
   }
  ],
@@ -122,7 +122,7 @@
   },
   {
    "severity": "high",
-   "where": "monitor.py 216-263 running alongside mstr_gap.py 215-231",
+   "where": "monitor.py 216-263 running alongside mstr_gap.py 250-273",
    "what": "Two band-rotation alerts with different triggers, different state files and contradictory payloads. monitor.py fires on the live spot quantile with a 1.0q buffer every 15 minutes; Alex's stated rule is the monthly close. Live q is 11.44 against a 16.0 trigger, so it is armed. If BTC rallies into the MSTR band intraday it pushes a rotation he should not take, in the retired 4-tier ladder's language (9mo/6mo PMCC, STRC on 1.5x margin), and moves its own state so the two versions diverge."
   },
   {

@@ -176,3 +176,52 @@ def test_holdings_priority(scenario):
     assert monitor.main() == 0
     kwargs = next(kwargs for title, _, kwargs in scenario.sent if title == "Holdings changed")
     assert kwargs == {"sound": "magic", "priority": -1}
+
+
+def test_ladder_lines_and_plays():
+    assert monitor.LADDER_LINES == (10, 60, 75)
+    assert [monitor.ladder_band(q) for q in (9.9, 10, 59.9, 60, 74.9, 75, 99)] == ["MSTX", "MSTR", "MSTR", "IBIT", "IBIT", "sell zone", "sell zone"]
+    assert "10 line" in monitor.BAND_PLAY["MSTX"] and "60 line" in monitor.BAND_PLAY["MSTR"] and "75 line" in monitor.BAND_PLAY["IBIT"]
+    assert monitor.BAND_LINE == {"MSTX": 10, "MSTR": 60, "IBIT": 75}
+
+
+def _month_end_case():
+    """The fixture's month-end close, the band it reads on today's lines, and a different band to pretend was stored."""
+    today = pd.Timestamp.now(tz="UTC").normalize(); first = today.replace(day=1)
+    m_end = (first - pd.Timedelta(milliseconds=1)).to_pydatetime(); px = 100000.0 if today.day == 1 else 90000.0
+    expected = monitor.ladder_band(monitor.ladder_q(px, m_end))
+    return (first - pd.Timedelta(days=1)).strftime("%Y-%m-%d"), expected, ("IBIT" if expected != "IBIT" else "MSTR")
+
+
+def test_moved_lines_are_adopted_with_one_notice_and_no_crossing_push(scenario):
+    """State written under other lines, from this same monthly close: one plain notice, never a crossing push."""
+    close, expected, stored = _month_end_case()
+    scenario.state.write_text(json.dumps({"strc": 98.5, "band": stored, "band_q": 10.6, "band_close": close}))
+    monitor.main()
+    titles = [x[0] for x in scenario.sent]
+    assert titles.count("Ladder lines: 10 / 60 / 75") == 1 and not any(x.startswith("Ladder band") for x in titles)
+    notice = next(x[1] for x in scenario.sent if x[0] == "Ladder lines: 10 / 60 / 75")
+    assert "No monthly close crossed a line" in notice and "<b>%s</b>" % expected in notice and "MSTR 10 to 60" in notice
+    state = json.loads(scenario.state.read_text())
+    assert state["band"] == expected and state["band_lines"] == "10 / 60 / 75" and "band_changed" in state
+    before = len(scenario.sent); monitor.main()
+    assert not any(x[0].startswith("Ladder") for x in scenario.sent[before:])
+
+
+def test_fresh_state_takes_the_band_silently(scenario):
+    close, expected, stored = _month_end_case()
+    monitor.main()
+    assert not any(x[0].startswith("Ladder") for x in scenario.sent)
+    state = json.loads(scenario.state.read_text())
+    assert state["band"] == expected and state["band_lines"] == "10 / 60 / 75"
+
+
+def test_a_new_monthly_close_still_pushes_the_crossing(scenario):
+    """Stored band from an older close: the normal rotation push fires, with or without the lines stamp, never the notice."""
+    close, expected, stored = _month_end_case()
+    for extra in ({"band_lines": "10 / 60 / 75"}, {}):
+        scenario.sent.clear()
+        scenario.state.write_text(json.dumps(dict({"strc": 98.5, "band": stored, "band_q": 9.0, "band_close": "2026-01-31"}, **extra)))
+        monitor.main()
+        titles = [x[0] for x in scenario.sent]
+        assert "Ladder band: %s" % expected in titles and not any(x.startswith("Ladder lines") for x in titles)
