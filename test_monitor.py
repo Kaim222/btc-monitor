@@ -225,3 +225,19 @@ def test_a_new_monthly_close_still_pushes_the_crossing(scenario):
         monitor.main()
         titles = [x[0] for x in scenario.sent]
         assert "Ladder band: %s" % expected in titles and not any(x.startswith("Ladder lines") for x in titles)
+
+
+def test_ladder_model_matches_the_site():
+    """Pinned to the site's own priceToQuantile and quantileToPrice under model v2 (checked in the browser on 2026-09-20)."""
+    from datetime import datetime, timezone
+    noon = lambda y, m, d: datetime(y, m, d, 12, tzinfo=timezone.utc)
+    for price, when, want in ((77200.0078125, noon(2026, 9, 12), 9.786), (80400, noon(2026, 9, 20), 11.359), (58600, noon(2026, 6, 30), 0.110),
+                              (124800, noon(2025, 10, 6), 82.866), (15800, noon(2022, 11, 21), 4.713), (250000, noon(2028, 1, 21), 87.199)):
+        assert abs(monitor.ladder_q(price, when) - want) < 0.01, (price, when, monitor.ladder_q(price, when))
+    for q, want in ((10, 85843), (60, 144899), (75, 166029), (85, 181801)):
+        assert abs(monitor.ladder_price(q, noon(2026, 12, 31)) - want) < 2, (q, monitor.ladder_price(q, noon(2026, 12, 31)))
+    offs = [o for _, o in monitor._band_offsets(noon(2040, 1, 1))]
+    assert offs == sorted(offs, reverse=True), "the lines must never cross"
+    import math
+    lo, hi = monitor.ladder_price(0.01, noon(2026, 12, 31)), monitor.ladder_price(99.99, noon(2026, 12, 31))
+    assert math.isfinite(lo) and math.isfinite(hi) and lo < monitor.ladder_price(0.1, noon(2026, 12, 31)) < monitor.ladder_price(99.9, noon(2026, 12, 31)) < hi, "tails extrapolate like the site"

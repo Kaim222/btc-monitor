@@ -125,16 +125,20 @@ def strc_rule(s):
     return max(0.775, 0.775 + (s - 77.5) * 0.005)
 def target(strc, btc, slope=None): return strc_rule(strc) + (SLOPE if slope is None else slope) * (btc - 75000) / 2500
 
-# The ladder: Kaim power law (A 5.82, B -17.029 on days since 2009-01-03) and its quantile bands, the same constants as the site.
-_GEN = datetime(2009, 1, 3, tzinfo=timezone.utc)
-_BANDS = [(99.9, -0.0000756204, 0.7434), (95, -0.0000583518, 0.5943), (85, -0.0000516698, 0.4318), (50, 0, -0.0004), (15, 0, -0.2092), (0.1, 0, -0.3403)]
+# The ladder: Kaim power law model v2, the same constants as the site (its data/ladder-model.json, fitted 2026-09-19, refit yearly).
+# Centre line 5.645315 x log10(days since 2009-01-03) - 16.430264 (least squares slope, intercept at the median of the gaps). Lines are
+# log10 offsets c x exp(-age / T), age in years since the genesis block: 15, 85 and 95 are nominal shares of all days under the line,
+# Floor (0.1) and Ceiling (99.9) are envelopes of every close since 2014. Model v1 was A 5.82, B -17.029 with straight-line decaying upper bands.
+_CLOCK = datetime(2009, 1, 3, tzinfo=timezone.utc)
+_MODEL_A, _MODEL_B = 5.645315, -16.430264
+_BANDS = [(99.9, 2.468226, 8.871781), (95, 1.589109, 8.871781), (85, 1.048162, 8.871781), (50, 0.0, None), (15, -0.339276, 20.784638), (0.1, -0.659285, 20.784638)]
 def _days(ts):
     if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
-    return (ts - _GEN).total_seconds() / 86400
+    return (ts - _CLOCK).total_seconds() / 86400
 def _band_offsets(ts):
-    d, today = _days(ts), _days(datetime.now(timezone.utc))
-    return [(q, m * (min(d, today) if m < 0 else d) + c) for q, m, c in _BANDS]    # the upper bands decay, capped at today
-def fair_value(ts): return 10 ** (5.82 * math.log10(_days(ts)) - 17.029)
+    age = _days(ts) / 365.25
+    return [(q, c if T is None else c * math.exp(-age / T)) for q, c, T in _BANDS]
+def fair_value(ts): return 10 ** (_MODEL_A * math.log10(_days(ts)) + _MODEL_B)
 def ladder_q(price, ts):
     res, bs = math.log10(price / fair_value(ts)), _band_offsets(ts)
     for (hq, ho), (lq, lo) in zip(bs, bs[1:]):
@@ -145,7 +149,8 @@ def ladder_price(q, ts):
     bs = _band_offsets(ts)
     for (hq, ho), (lq, lo) in zip(bs, bs[1:]):
         if lq <= q <= hq: return fair_value(ts) * 10 ** (lo + (q - lq) / (hq - lq) * (ho - lo))
-    return float("nan")
+    (q0, o0), (q1, o1) = (bs[0], bs[1]) if q > bs[0][0] else (bs[-1], bs[-2])        # past either end, the outer pair's slope, as the site does
+    return fair_value(ts) * 10 ** (o0 + (o0 - o1) / (q0 - q1) * (q - q0))
 LADDER_LINES = (10, 60, 75)          # moved from 15 / 50 / 85 on 2026-09-20 after the cut-point study on real prices since 2020
 LINES_TXT = " / ".join(str(x) for x in LADDER_LINES)
 def ladder_band(q): return "MSTX" if q < LADDER_LINES[0] else "MSTR" if q < LADDER_LINES[1] else "IBIT" if q < LADDER_LINES[2] else "sell zone"

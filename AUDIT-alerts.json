@@ -2,7 +2,7 @@
  "sections": [
   {
    "name": "LAG (day trade)",
-   "lines": "mstr_gap.py 312-342",
+   "lines": "mstr_gap.py 369-402",
    "shows": "MSTR's gap fell past lag_threshold (-1.5% MSTR = -3.0% MSTX) below its own trailing-hour average, measured at the bar LOW, while BTC's own hour move held above -1%. Scans every bar since last_bar and judges the deepest qualifying one. 60-minute cooldown. Muted when BTC is below its 50-day (regime_gate true).",
    "source": "1-minute MSTR/BTC/MSTX bars from yfinance; lag_slope 0.0125 from the live ladder-site config; thresholds lag_threshold -0.015, btc_hour_move_floor -0.01",
    "verdict": "keep",
@@ -13,7 +13,7 @@
   },
   {
    "name": "CHEAP (swing trade)",
-   "lines": "mstr_gap.py 343-356 (level_due 344-348)",
+   "lines": "mstr_gap.py 403-419 (level_due 404-410)",
    "shows": "MSTX gap at or below -6% (cheap_threshold -0.03 doubled). Fires on the cross, again on each full point further, otherwise at most hourly while it holds. Muted when BTC is below its 50-day.",
    "source": "Same bar set; cheap_threshold from the live config; gap_x computed off yesterday's MSTX close and the projected MSTR move x2",
    "verdict": "keep",
@@ -24,7 +24,7 @@
   },
   {
    "name": "RICH (sell)",
-   "lines": "mstr_gap.py 357-366",
+   "lines": "mstr_gap.py 420-432",
    "shows": "MSTX gap at or above +8% (rich_threshold 0.04 doubled). Same cross / full-point / hourly cadence. Not gated: rich_gate is false in the live config, so the mute branch at 357-358 is dead code.",
    "source": "Same bar set; rich_threshold from the live config; STRC price from yfinance rides along as context",
    "verdict": "keep",
@@ -34,9 +34,9 @@
   },
   {
    "name": "BAND — ladder band on the monthly close",
-   "lines": "mstr_gap.py 250-273",
+   "lines": "mstr_gap.py 254-277",
    "shows": "Runs the prior month's last daily BTC close through the Kaim power-law quantile and pushes when the band moves (under 10 MSTX, 10-60 MSTR, 60-75 IBIT, 75+ sell zone). Carries the band's PMCC structure and the 90-day band-line price.",
-   "source": "BTC-USD daily closes (130d) from yfinance; ladder lines are LADDER_LINES at line 149, matching the site; the fitted quantile bands are _BANDS at line 130 and did not move",
+   "source": "BTC-USD daily closes (130d) from yfinance; ladder lines are LADDER_LINES at line 153, matching the site; the model's lines are _BANDS at line 134 (model v2 since 2026-09-20)",
    "verdict": "keep",
    "reason": "This is the version that matches Alex's stated rule (band moves on the monthly close, agreed 9/17). It fires at most once a month and carries the rotation instruction. Keep this one and delete its competitor.",
    "duplicates": "monitor.py's rotation alert (monitor.py 216-263) fires the same instruction off the LIVE spot quantile every 15 minutes, 24/7, with a 1.0q hysteresis buffer.",
@@ -44,7 +44,7 @@
   },
   {
    "name": "BTC 50-day crossing (the gate)",
-   "lines": "mstr_gap.py 232-246",
+   "lines": "mstr_gap.py 278-294",
    "shows": "BTC's completed daily close crossing its 50-day SMA, pushed once on the flip. Turns the Lag and Cheap gate on or off and carries the play for the new state.",
    "source": "BTC-USD daily closes, completed UTC days only (line 212 excludes today), 50-day mean at line 213",
    "verdict": "keep",
@@ -65,7 +65,7 @@
   },
   {
    "name": "WATCH rows (ledger only, no push)",
-   "lines": "mstr_gap.py 367-373",
+   "lines": "mstr_gap.py 433-442",
    "shows": "A lag reading past lag_watch (-1.0% MSTR) that did not fire. Written to mstr_ledger.json, at most one per 30 minutes. No notification.",
    "source": "Same lag computation",
    "verdict": "keep",
@@ -90,7 +90,7 @@
    "source": "CoinGecko spot with a Coinbase fallback; its own state file state.json (currently band 'MSTX PMCC', quantile 11.44)",
    "verdict": "cut",
    "reason": "Three independent reasons. (1) It duplicates the BAND alert on a trigger Alex's own 9/17 rules say is wrong: the band moves on the monthly close, not on an intraday touch. (2) Its payload is the retired 4-tier ladder (MSTR PMCC long 9mo / short 6mo, STRC on 1.5x margin) and contradicts the structures mstr_gap.py sends for the same band (long 12 months at 0.75 delta, short 90 days at the band ceiling). (3) If it ever fires it also moves its own state, so it would push a rotation Alex should not take AND could then be out of sync with the monthly-close version. It is pure noise with a wrong-answer failure mode.",
-   "duplicates": "mstr_gap.py 250-273, the monthly-close BAND alert, which is the correct version",
+   "duplicates": "mstr_gap.py 254-277, the monthly-close BAND alert, which is the correct version",
    "stale_or_hardcoded": "LADDER at monitor.py 32-41 and LEGACY_MAP at 44-51 are the old 6-tier/4-tier scheme. HYST = 1.0 at line 30. Its commit step (monitor.yml 29-35) is a bare git push with no fetch, retry or if: always(); it lost the race today at 18:47 (run 35382188076, '! [rejected] main -> main (fetch first)')."
   }
  ],
@@ -122,7 +122,7 @@
   },
   {
    "severity": "high",
-   "where": "monitor.py 216-263 running alongside mstr_gap.py 250-273",
+   "where": "monitor.py 216-263 running alongside mstr_gap.py 254-277",
    "what": "Two band-rotation alerts with different triggers, different state files and contradictory payloads. monitor.py fires on the live spot quantile with a 1.0q buffer every 15 minutes; Alex's stated rule is the monthly close. Live q is 11.44 against a 16.0 trigger, so it is armed. If BTC rallies into the MSTR band intraday it pushes a rotation he should not take, in the retired 4-tier ladder's language (9mo/6mo PMCC, STRC on 1.5x margin), and moves its own state so the two versions diverge."
   },
   {
