@@ -46,7 +46,7 @@ def scenario(monkeypatch):
         mstr.iloc[-1, 1] = 90.0  # A due Lag followed by a due Rich.
         btc = pd.Series(100000.0, index=pd.date_range("2026-09-18 08:00", periods=200, freq="min", tz=monitor.NY))
         mstx = pd.Series(100.0, index=index)
-        mstx.iloc[-1] = 120.0
+        mstx.iloc[-1] = 121.0
         data = {"MSTR": mstr, "BTC-USD": btc, "MSTX": mstx}
         monkeypatch.setattr(monitor, "bars", lambda ticker, **kwargs: data[ticker].copy())
         daily_index = pd.date_range(end=pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1), periods=130)
@@ -243,7 +243,7 @@ def test_ladder_model_matches_the_site():
     assert math.isfinite(lo) and math.isfinite(hi) and lo < monitor.ladder_price(0.1, noon(2026, 12, 31)) < monitor.ladder_price(99.9, noon(2026, 12, 31)) < hi, "tails extrapolate like the site"
 
 
-@pytest.mark.parametrize("config, cheap, rich", [({}, -0.06, 0.08), ({"gap_centre": 0}, -0.06, 0.08), ({"gap_centre": 0.04}, 0.02, 0.16)])
+@pytest.mark.parametrize("config, cheap, rich", [({}, -0.17, 0.20), ({"gap_centre": 0}, -0.17, 0.20), ({"gap_centre": 0.04}, -0.17, 0.20)])
 def test_gap_centre_thresholds_leave_lag_unchanged(config, cheap, rich):
     monitor.configure(config)
     assert monitor.CHEAP_X == pytest.approx(cheap)
@@ -254,11 +254,11 @@ def test_gap_centre_thresholds_leave_lag_unchanged(config, cheap, rich):
 
 
 @pytest.mark.parametrize("config, mstx, expected", [
-    ({}, 93.9, "cheap"), ({}, 94.1, None),
-    ({}, 107.9, None), ({}, 108.1, "rich"),
-    ({"gap_centre": 0.04}, 101.9, "cheap"), ({"gap_centre": 0.04}, 102.1, None),
-    ({"gap_centre": 0.04}, 115.9, None), ({"gap_centre": 0.04}, 116.1, "rich"),
-    ({"gap_centre": 0.04}, 110.0, None),
+    ({}, 82.9, "cheap"), ({}, 83.1, None),
+    ({}, 119.9, None), ({}, 120.1, "rich"),
+    ({"gap_centre": 0.04}, 83.1, None), ({"gap_centre": 0.04}, 120.1, "rich"),
+    ({"cheap_threshold": -0.05, "rich_threshold": 0.075}, 89.9, "cheap"),
+    ({"cheap_threshold": -0.05, "rich_threshold": 0.075}, 115.1, "rich"),
 ])
 def test_centred_and_legacy_alerts(scenario, monkeypatch, config, mstx, expected):
     monkeypatch.setattr(monitor, "load_config", lambda: {"_source": "test", **config})
@@ -267,3 +267,57 @@ def test_centred_and_legacy_alerts(scenario, monkeypatch, config, mstx, expected
     kinds = [row["kind"] for row in json.loads(scenario.ledger.read_text())]
     assert "lag" in kinds
     assert [kind for kind in kinds if kind in ("cheap", "rich")] == ([expected] if expected else [])
+
+
+def test_fitted_price_shortfall_cap_and_independent_lag():
+    config = json.loads((ROOT / "mstr_config.json").read_text())
+    monitor.configure(config)
+    f = config["fit"]
+    for btc in (60000, 81526.74, 100000, 125000, 150000, 200000):
+        for strc in (80, 98.7, 100, 105):
+            expected = min(2, f["a"] + f["b"] * (btc - 75000) / 2500 + f["c"] * max(0, 100-strc))
+            assert monitor.target(strc, btc) == pytest.approx(expected)
+    assert monitor.target(100, 100000) == monitor.target(105, 100000)
+    assert monitor.target(80, 100000) <= monitor.target(100, 100000)
+    assert monitor.target(98.7, 200000) == 2
+    assert monitor.target(98.7, 100000, monitor.LAG_SLOPE) == pytest.approx(1.025)
+    assert monitor.target(90, 100000, monitor.LAG_SLOPE) == pytest.approx(0.9625)
+
+
+def test_old_remote_config_uses_local_fit(monkeypatch):
+    from io import BytesIO
+    monkeypatch.setattr(monitor.urllib.request, "urlopen", lambda *a, **k: BytesIO(b'{"btc_slope_per_2500": 0.025}'))
+    monkeypatch.setattr(monitor, "CONFIG_FILE", str(ROOT / "mstr_config.json"))
+    cfg = monitor.load_config()
+    assert cfg["_source"] == "local"
+    assert cfg["fit"]["c"] <= 0
+
+
+def test_pine_sync_fits_prices_preserves_lag_and_newlines(tmp_path, monkeypatch):
+    config = json.loads((ROOT / "mstr_config.json").read_text())
+    monitor.configure(config)
+    paths = []
+    for name in monitor.PINE_FILES:
+        original = (ROOT / name).read_bytes()
+        path = tmp_path / name
+        path.write_bytes(original)
+        paths.append(str(path))
+    monkeypatch.setattr(monitor, "PINE_FILES", paths)
+    assert monitor.sync_pine(900000, 500)
+    for path in paths:
+        raw = Path(path).read_bytes()
+        assert raw.count(b"\n") == raw.count(b"\r\n")
+        text = raw.decode()
+        assert 'input.float(%s, "Fitted intercept"' % repr(config["fit"]["a"]) in text
+        assert 'input.float(%s, "Target mNAV slope' % repr(config["fit"]["b"]) in text
+        assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
+        if Path(path).name == "mstx_projected.pine":
+            assert 'input.float(0.0125, "Lag slope' in text
+            assert 'input.float(-17, "Cheap line, MSTX' in text
+            assert 'input.float(20, "Rich line, MSTX' in text
+        else:
+            assert 'input.float(0.025, "Legacy lag slope' in text
+            assert 'input.float(-8.5, "Cheap line' in text
+            assert 'input.float(10, "Rich line' in text
+        assert 'lagBase(strc) + lagSlope * (btc - 75000) / 2500' in text
+    assert not monitor.sync_pine(900000, 500)

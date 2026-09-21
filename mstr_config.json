@@ -1,17 +1,72 @@
 {
   "btc_held": "auto",
   "shares_m": "auto",
-  "btc_slope_per_2500": 0.025,
+  "btc_slope_per_2500": 0.030355691245129924,
   "lag_threshold": -0.015,
-  "gap_centre": 0.04,
-  "cheap_threshold": -0.03,
-  "rich_threshold": 0.04,
+  "gap_centre": 0,
+  "cheap_threshold": -0.085,
+  "rich_threshold": 0.1,
   "btc_hour_move_floor": -0.01,
   "regime_gate": true,
-  "updated": "2026-09-17",
-  "note": "One file for the MSTX tab, the gap monitor and the TradingView indicator. Holdings and ADSO come live from api.strategy.com. btc_slope_per_2500 0.025 is Alex's sheet and matches the last three months' measured mNAV beta (0.81); it sets the projected price and therefore Cheap and Rich. lag_slope 0.0125 is DELIBERATELY different: the lag is a minute-scale deviation from its own trailing average, a different job from pricing a level, and it separates better at the lower slope. On 60 days of 5-minute bars at the bar low, distinct events 60+ minutes apart, 0.0125 at a -3.0% MSTX line gave 17 events (2.0/week), 65% positive at 60 minutes, median MSTX +0.49% and median MSTR-minus-BTC +0.28% -- the best hit rate of any slope and threshold pair tested. 0.025 at -3.0% was 13 events and 62% positive with a negative median on the market-neutral measure. Alex's call, 9/17. On 19 days of 1-minute bars the three slopes are statistically indistinguishable (10 to 15 events), so the 5-minute window is what this rests on. lag_threshold -0.015 = -3.0% MSTX, measured at MSTR's bar low (lag_at_low). lag_watch -0.01 = -2.0% MSTX, logged to the ledger without a push so the shallow zone keeps accumulating evidence. cheap_threshold -0.03 and rich_threshold 0.04 are MSTR terms; the Cheap and Rich tests run on the MSTX gap at twice these. regime_gate true governs LAG and CHEAP only, which is the rule Alex actually stated: use the buy signals when BTC is above its 50-day. rich_gate false since 9/17: Rich fires in either regime. The mirror-image rule that Rich should fire only below the 50-day was a symmetry assumption the system added, never Alex's, and it is the least supported rule in the file. Rich declined in BOTH states on the daily data at a +3% MSTR line: MSTR minus BTC over ten days -8.25% with BTC above its 50-day, -5.41% median below, five of six below-gate episodes down against BTC. The mechanism is why this is more than a six-episode backtest: Rich measures the premium to net asset value, which is the condition that mechanically triggers MSTR's at-the-market issuance, so a rich reading identifies new supply arriving rather than merely correlating with a decline. Caveat on all gate evidence: the STRC era is a downtrend end to end, so every above-the-50-day day in the sample is a bounce inside a decline and the gate has never been observed in a real uptrend. Review 2026-09-20 measured a -4.24% bare rule nowcast bias in chk_models_review.md, so gap_centre 0.04 centres Cheap and Rich on the rounded 4% MSTR premium and setting it to 0 reverts.",
+  "updated": "2026-09-21",
+  "note": "Fair value uses a fitted Bitcoin line and a nonpositive STRC shortfall term below par. Cheap and Rich are the fitted gap quartiles rounded to half a percent in MSTR terms. MSTX alert thresholds are twice these values. The lag signal is unchanged.",
   "lag_at_low": true,
   "lag_watch": -0.01,
   "lag_slope": 0.0125,
-  "rich_gate": false
+  "rich_gate": false,
+  "fit": {
+    "a": 0.9349260602738632,
+    "b": 0.030355691245129924,
+    "c": -0.0029161736798696616,
+    "par": 100,
+    "sessions": 287,
+    "from": "2025-07-30",
+    "to": "2026-09-18",
+    "fitted_on": "2026-09-21",
+    "r2": 0.7760069378369293,
+    "p25": -8.551110539567798,
+    "p75": 9.813009815572581,
+    "median_abs_gap_pct": 9.322384153594054,
+    "walk_forward": {
+      "5": {
+        "fair_value": {
+          "sessions": 162,
+          "median_abs_pct": 11.24688629693269,
+          "mean_abs_pct": 13.752160580623622
+        },
+        "gap_carry": {
+          "sessions": 162,
+          "median_abs_pct": 3.671195367397573,
+          "mean_abs_pct": 6.408306408215471
+        }
+      },
+      "20": {
+        "fair_value": {
+          "sessions": 147,
+          "median_abs_pct": 14.745476604041452,
+          "mean_abs_pct": 18.00686188569208
+        },
+        "gap_carry": {
+          "sessions": 147,
+          "median_abs_pct": 10.06786571239795,
+          "mean_abs_pct": 13.454436346916342
+        }
+      },
+      "40": {
+        "fair_value": {
+          "sessions": 127,
+          "median_abs_pct": 18.910202254175967,
+          "mean_abs_pct": 21.186642849865446
+        },
+        "gap_carry": {
+          "sessions": 127,
+          "median_abs_pct": 17.20588677953878,
+          "mean_abs_pct": 18.98772321934328
+        }
+      }
+    },
+    "walk_forward_note": "At least 120 earlier sessions per fit. Origin excluded from training. Endpoint Bitcoin and STRC given. Origin Bitcoin per share held fixed. Absolute miss as percent of actual MSTR. Overlapping horizons. 28 calendar day gap half life. mNAV cap 2."
+  },
+  "gap_half_life_days": 28,
+  "lookup_note": "Projected uses the fitted line capped at mNAV 2. Best estimate carries today's gap with a 28 calendar day half life."
 }

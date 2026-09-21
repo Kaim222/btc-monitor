@@ -52,10 +52,14 @@ def load(path, default):
 def load_config():
     try:
         req = urllib.request.Request(CONFIG_URL + "?t=%d" % int(datetime.now().timestamp()), headers={"User-Agent": "mstr-gap-monitor"})
-        with urllib.request.urlopen(req, timeout=10) as r: cfg = json.loads(r.read()); cfg["_source"] = "ladder site"; return cfg
+        with urllib.request.urlopen(req, timeout=10) as r: cfg = json.loads(r.read())
+        if not isinstance(cfg.get("fit"), dict): raise ValueError("remote config has no fitted line")
+        cfg["_source"] = "ladder site"
+        return cfg
     except Exception as e:
         print("config from the ladder site failed (%s); using the local file" % e)
         cfg = load(CONFIG_FILE, {}); cfg["_source"] = "local"; return cfg
+FIT_DEFAULT = {'a': 0.9349260602738632, 'b': 0.030355691245129924, 'c': -0.0029161736798696616, 'par': 100}
 cfg = {}
 STRATEGY_API = "https://api.strategy.com/btc/bitcoinKpis"
 def strategy_holdings(state):
@@ -75,37 +79,45 @@ PINE_FILES = ["mstr_gap_lag.pine", "mstr_projected.pine", "mstx_projected.pine"]
 def sync_pine(held, shares_m):
     """Rewrite the indicators' default inputs from the live holdings and config, so a re-paste carries the real numbers.
 
-    This used to sync only BTC held and the share count, which let the slope and the thresholds drift: the indicator sat
-    at slope 0.0125 while the config said 0.025, so a freshly pasted chart drew its projected line about 1.8% off on MSTX
-    and every gap reading with it. Anything the config owns is written here too. Returns True if any file changed.
+    Price coefficients and gap thresholds follow the fitted config. Lag settings stay independent.
     """
     import re
     subs = [(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held))),
             (r'input\.float\([0-9.]+, "Assumed diluted shares \(M\)"', 'input.float(%.3f, "Assumed diluted shares (M)"' % shares_m),
-            (r'input\.float\([0-9.]+, "Target mNAV slope per \$2,500 of BTC"', 'input.float(%s, "Target mNAV slope per $2,500 of BTC"' % ("%g" % SLOPE)),
+            (r'input\.float\([0-9.]+, "Target mNAV slope per \$2,500 of BTC"', 'input.float(%s, "Target mNAV slope per $2,500 of BTC"' % (repr(SLOPE))),
             (r'input\.float\([0-9.]+, "Lag slope per \$2,500 of BTC \(the lag runs on its own\)"', 'input.float(%s, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % ("%g" % LAG_SLOPE)),
             (r'input\.float\(-?[0-9.]+, "Lag alert, MSTX % vs the trailing window"', 'input.float(%g, "Lag alert, MSTX %% vs the trailing window"' % (100 * LAG_X)),
             (r'input\.float\(-?[0-9.]+, "Cheap line, MSTX % under projection"', 'input.float(%g, "Cheap line, MSTX %% under projection"' % (100 * CHEAP_X)),
             (r'input\.float\(-?[0-9.]+, "Rich line, MSTX % over projection"', 'input.float(%g, "Rich line, MSTX %% over projection"' % (100 * RICH_X))]
+    for key, label in [("a", "Fitted intercept"), ("c", "Fitted STRC shortfall"), ("par", "STRC par")]:
+        subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%s, "%s"' % (repr(FIT[key]), label)))
+    for label, value in [("Cheap line (% under projection)", CHEAP * 100), ("Rich line (% over projection)", RICH * 100)]:
+        subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%g, "%s"' % (value, label)))
     changed = False
     for pf in PINE_FILES:
         if not os.path.exists(pf): continue
-        src = new = open(pf, encoding="utf-8").read()
+        raw = open(pf, "rb").read()
+        newline = "\r\n" if b"\r\n" in raw else "\n"
+        src = new = raw.decode("utf-8").replace("\r\n", "\n")
         for pat, rep in subs: new = re.sub(pat, rep, new)
         if new != src:
-            open(pf, "w", encoding="utf-8").write(new); changed = True
+            with open(pf, "wb") as out: out.write(new.replace("\n", newline).encode("utf-8"))
+            changed = True
     return changed
 def configure(config, held=None, shares=None, source="none"):
     global cfg, HOLD_SRC, BTC_HELD, SHARES_M, SLOPE, LAG, CHEAP, RICH, LAG_X, CHEAP_X, RICH_X
-    global BTC_HOLD, GATE, RICH_GATE, LAG_SLOPE, LAG_AT_LOW, LAG_WATCH, BPS
+    global BTC_HOLD, GATE, RICH_GATE, LAG_SLOPE, LAG_AT_LOW, LAG_WATCH, BPS, FIT
     cfg = config
     _h, _s, HOLD_SRC = held, shares, source
     if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_held"]), "config override"
     if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
     BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
-    SLOPE = float(cfg.get("btc_slope_per_2500", 0.025))            # fallbacks mirror the live config; a failed fetch must not change the rules
-    LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.03)), float(cfg.get("rich_threshold", 0.04))
-    centre = float(cfg.get("gap_centre", 0))
+    FIT = dict(cfg.get("fit", FIT_DEFAULT))
+    if not all(math.isfinite(float(FIT[k])) for k in ("a", "b", "c", "par")) or FIT["c"] > 0:
+        raise ValueError("Invalid fitted line")
+    SLOPE = float(FIT["b"])
+    LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.085)), float(cfg.get("rich_threshold", 0.10))
+    centre = 0.0
     LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * (centre + CHEAP), 2 * (centre + RICH)   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
     BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
     GATE = bool(cfg.get("regime_gate", True))          # LAG and CHEAP only: the buy signals want BTC above its 50-day
@@ -117,14 +129,18 @@ def configure(config, held=None, shares=None, source="none"):
 
 configure({})
 
-def strc_rule(s):
+def lag_base(s):
     if s >= 97.5: return 0.90
     if s >= 95: return 0.875 + (s - 95) * 0.01
     if s >= 92.5: return 0.85 + (s - 92.5) * 0.01
     if s >= 87.5: return 0.825 + (s - 87.5) * 0.005
     if s >= 82.5: return 0.80 + (s - 82.5) * 0.005
     return max(0.775, 0.775 + (s - 77.5) * 0.005)
-def target(strc, btc, slope=None): return strc_rule(strc) + (SLOPE if slope is None else slope) * (btc - 75000) / 2500
+def target(strc, btc, slope=None):
+    # Preserve the independent lag calculation exactly, including its historical base.
+    if slope is not None:
+        return lag_base(strc) + slope * (btc - 75000) / 2500
+    return min(2.0, FIT["a"] + FIT["c"] * max(0, FIT["par"] - strc) + FIT["b"] * (btc - 75000) / 2500)
 
 # The ladder: Kaim power law model v2, the same constants as the site (its data/ladder-model.json, fitted 2026-09-19, refit yearly).
 # Centre line 5.645315 x log10(days since 2009-01-03) - 16.430264 (least squares slope, intercept at the median of the gaps). Lines are
@@ -325,11 +341,7 @@ def main():
         btc_last = float(df["BTC"].iloc[-1])
         df["target"] = [target(strc, b) for b in df["BTC"]]
         df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
-        # The LAG runs on its OWN slope (config lag_slope 0.0125), not the slope the projected price uses (0.025). They are
-        # different jobs: the projection is a level and wants the slope matching measured mNAV beta; the lag is a minute-scale
-        # deviation from its own trailing average and separates better at the lower slope. On 60 days of 5-minute bars,
-        # 0.0125 at a -3.0% MSTX line gave 17 events, 65% positive, median MSTX +0.49% and median MSTR-minus-BTC +0.28%, the
-        # best hit rate of any slope/threshold pair tested. Alex's call, 9/17. Cheap and Rich still read the 0.025 gap.
+        # Lag keeps its independent historical base and slope. Price levels use the fitted line.
         df["tgt_lag"] = [target(strc, b, LAG_SLOPE) for b in df["BTC"]]
         df["proj_lag"] = BPS * df["BTC"] * df["tgt_lag"]
         df["gap_lag"] = df["MSTR"] / df["proj_lag"] - 1
@@ -429,7 +441,7 @@ def main():
                 # no STRC in it (-4.36% vs -5.05%). The two extreme episodes went the wrong way too: STRC 88.22 was
                 # followed by MSTR beating BTC by 8.2 points, STRC 99.74 by losing 16.1. The arbitrage is real economics;
                 # it is not a detectable edge in fourteen months of price data.
-                push("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH.</b> MSTX is ahead of projected. BTC is %s its 50-day. Six earlier Rich starts: after the four in 2025 MSTX was lower a month later, after the two in 2026 it ran 39%% and 44%%. Rich is not a sell on its own.\n<b>STRC $%.2f, %+.1f%% to par.</b>\n<b>Play:</b> no new primary while Rich is on. A short vertical from the swing sleeve is optional; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+                push("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH.</b> MSTX is ahead of projected. BTC is %s its 50-day. The fitted gap quartile sets this line. Rich is not a sell on its own.\n<b>STRC $%.2f, %+.1f%% to par.</b>\n<b>Play:</b> no new primary while Rich is on. A short vertical from the swing sleeve is optional; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
         except Exception as exc:
             failed('Rich', exc)
         try:
