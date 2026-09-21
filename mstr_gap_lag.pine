@@ -12,8 +12,8 @@ fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001)
 fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001)
 fitPar    = input.float(100, "STRC par", step=1)
 lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1)
-cheapT    = input.float(-8.5, "Cheap line (% under projection)", step=0.5)
-richT     = input.float(10, "Rich line (% over projection)", step=0.5)
+cheapT    = input.float(-4.38295, "Cheap line (% under projection)", step=0.5)
+richT     = input.float(2.69589, "Rich line (% over projection)", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
@@ -38,10 +38,23 @@ lagBase(s) =>
 winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
 
 // swing signal: needs holdings
+// The outer daily request runs on MSTR sessions. Offset the complete average
+// by one daily bar so today's changing price never enters its own baseline.
+// BTC and STRC daily feeds and the supplied BPS inputs define this chart's line.
+premiumN = input.int(10, "Premium sessions", minval=1)
+priorPremium() =>
+    db = request.security(btcSym, "D", close)
+    ds = request.security(strcSym, "D", close)
+    dt = math.min(2.0, fitA + fitC * math.max(0, fitPar - ds) + slope * (db - 75000) / 2500)
+    dp = close / (db * (btcHeld / (sharesM * 1e6)) * dt) - 1
+    ta.sma(dp, premiumN)[1]
+premiumAvg = request.security(mstrSym, "D", priorPremium(), lookahead=barmerge.lookahead_on)
+
 target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc) + slope * (btc - 75000) / 2500)
 bps    = btcHeld / (sharesM * 1e6)
-proj   = btc * bps * target
-gap    = (mstr / proj - 1) * 100
+lineM  = btc * bps * target
+proj   = lineM * (1 + premiumAvg)
+gap    = (mstr / lineM - 1 - premiumAvg) * 100
 
 // day-trade signal: holdings cancel, so this part never needs updating
 // Keep this indicator's original independent lag calibration.
@@ -72,7 +85,7 @@ plotshape(buyBar, "Buy", shape.labelup, location.bottom, color=color.new(color.a
 
 alertcondition(lagFire, "Lag", "MSTR lag {{plot_1}}% vs its window, BTC holding. Gap {{plot_0}}%. Window: the next hour.")
 alertcondition(cheapFire, "Cheap", "MSTR {{plot_0}}% under projection (about 2x on MSTX). Swing line.")
-alertcondition(richFire, "Rich", "MSTR {{plot_0}}% over projection. Rich readings faded about 2% vs BTC over five days.")
+alertcondition(richFire, "Rich", "MSTR {{plot_0}}% over projection. Recent premium excess is above its upper quartile.")
 
 var table t = table.new(position.top_right, 2, 5, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
 if barstate.islast

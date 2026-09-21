@@ -2,7 +2,8 @@
 MSTR gap monitor: fires Pushover when MSTR trades away from Alex's projected price.
 
 Projected MSTR = BTC x (BTC held / shares) x target mNAV, target = STRC rule + slope x (BTC - 75,000) / 2,500.
-gap = MSTR / projected - 1.
+Fair value = fitted line x (1 + prior completed session average premium).
+Excess = MSTR / fitted line - 1 - average premium. Cheap and Rich use excess.
 
 Three alerts:
   LAG    the gap falls past lag_threshold (config, -1.5% MSTR = -3.0% MSTX) below its own average over the previous
@@ -42,6 +43,7 @@ import pandas as pd, yfinance as yf
 
 NY = ZoneInfo("America/New_York")
 CONFIG_URL = "https://raw.githubusercontent.com/Kaim222/btc-quantile-ladder/main/data/mstr-config.json"
+MODEL_URL = "https://raw.githubusercontent.com/Kaim222/btc-quantile-ladder/main/data/mstr-model.json"
 CONFIG_FILE, STATE_FILE, LEDGER_FILE = "mstr_config.json", "mstr_state.json", "mstr_ledger.json"
 FORCE, TEST = "--force" in sys.argv, "--test" in sys.argv
 
@@ -59,6 +61,38 @@ def load_config():
     except Exception as e:
         print("config from the ladder site failed (%s); using the local file" % e)
         cfg = load(CONFIG_FILE, {}); cfg["_source"] = "local"; return cfg
+def valid_premium(p):
+    if not isinstance(p, dict): return False
+    try:
+        values = [float(p[k]) for k in ("average", "p10", "p25", "p75", "p90")]
+        return (all(math.isfinite(x) for x in values) and values[0] > -1
+                and isinstance(p["n"], int) and 1 <= p["n"] <= 252
+                and p["from"] <= p["to"] and values[1] <= values[2] <= values[3] <= values[4])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def load_premium(state):
+    """One short request per run. Preserve the last valid value through outages."""
+    try:
+        req = urllib.request.Request(MODEL_URL, headers={"User-Agent": "mstr-gap-monitor", "Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            premium = json.loads(response.read())["premium"]
+        if not valid_premium(premium): raise ValueError("invalid premium object")
+        state["premium_last"] = premium
+        return premium
+    except Exception as exc:
+        print("premium fetch failed (%s); using saved premium" % exc)
+        saved = state.get("premium_last")
+        if valid_premium(saved): return saved
+        return {"average": 0.0, "n": int(cfg.get("premium", {}).get("n", 10))}
+
+
+def excess_gap(mstr, fitted_price, average):
+    """MSTR percentage points in decimal units, never a gap divided by fair value."""
+    return mstr / fitted_price - 1 - average
+
+
 FIT_DEFAULT = {'a': 0.9349260602738632, 'b': 0.030355691245129924, 'c': -0.0029161736798696616, 'par': 100}
 cfg = {}
 STRATEGY_API = "https://api.strategy.com/btc/bitcoinKpis"
@@ -93,6 +127,7 @@ def sync_pine(held, shares_m):
         subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%s, "%s"' % (repr(FIT[key]), label)))
     for label, value in [("Cheap line (% under projection)", CHEAP * 100), ("Rich line (% over projection)", RICH * 100)]:
         subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%g, "%s"' % (value, label)))
+    subs.append((r'input\.int\([0-9]+, "Premium sessions"', 'input.int(%d, "Premium sessions"' % PREMIUM_N))
     changed = False
     for pf in PINE_FILES:
         if not os.path.exists(pf): continue
@@ -104,9 +139,9 @@ def sync_pine(held, shares_m):
             with open(pf, "wb") as out: out.write(new.replace("\n", newline).encode("utf-8"))
             changed = True
     return changed
-def configure(config, held=None, shares=None, source="none"):
+def configure(config, held=None, shares=None, source="none", premium=None):
     global cfg, HOLD_SRC, BTC_HELD, SHARES_M, SLOPE, LAG, CHEAP, RICH, LAG_X, CHEAP_X, RICH_X
-    global BTC_HOLD, GATE, RICH_GATE, LAG_SLOPE, LAG_AT_LOW, LAG_WATCH, BPS, FIT
+    global BTC_HOLD, GATE, RICH_GATE, LAG_SLOPE, LAG_AT_LOW, LAG_WATCH, BPS, FIT, PREMIUM_AVG, PREMIUM_N
     cfg = config
     _h, _s, HOLD_SRC = held, shares, source
     if cfg.get("btc_held") not in (None, "", "auto"): _h, HOLD_SRC = float(cfg["btc_held"]), "config override"
@@ -117,6 +152,9 @@ def configure(config, held=None, shares=None, source="none"):
         raise ValueError("Invalid fitted line")
     SLOPE = float(FIT["b"])
     LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.085)), float(cfg.get("rich_threshold", 0.10))
+    PREMIUM_AVG = float((premium or {}).get("average", 0))
+    PREMIUM_N = int((premium or cfg.get("premium", {})).get("n", 10))
+    if valid_premium(premium): CHEAP, RICH = float(premium["p25"]), float(premium["p75"])
     centre = 0.0
     LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * (centre + CHEAP), 2 * (centre + RICH)   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
     BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
@@ -242,13 +280,14 @@ def main():
             raise RuntimeError("Pushover delivery failed after three attempts: %s" % args[0])
 
     def run():
+        premium = load_premium(state)
         cached = state.get("strategy_last") or {}
         configure(load_config(), cached.get("btc_held"), cached.get("shares_m"),
-                  "strategy.com cached %s" % cached.get("fetched", "")[:16] if cached else "none")
+                  "strategy.com cached %s" % cached.get("fetched", "")[:16] if cached else "none", premium=premium)
         try:
             _prev = dict(cached)
             _h, _s, source = strategy_holdings(state)
-            configure(cfg, _h, _s, source)
+            configure(cfg, _h, _s, source, premium=premium)
             if _h and _s and "override" not in HOLD_SRC:
                 sync_pine(_h, _s)
                 moved = _prev and (abs(float(_prev.get("btc_held", 0)) - _h) >= 1 or abs(float(_prev.get("shares_m", 0)) - _s) >= 0.001)
@@ -340,7 +379,9 @@ def main():
             strc = float(state["strc"])
         btc_last = float(df["BTC"].iloc[-1])
         df["target"] = [target(strc, b) for b in df["BTC"]]
-        df["proj"] = BPS * df["BTC"] * df["target"]; df["gap"] = df["MSTR"] / df["proj"] - 1
+        df["line"] = BPS * df["BTC"] * df["target"]
+        df["proj"] = df["line"] * (1 + PREMIUM_AVG)
+        df["gap"] = excess_gap(df["MSTR"], df["line"], PREMIUM_AVG)
         # Lag keeps its independent historical base and slope. Price levels use the fitted line.
         df["tgt_lag"] = [target(strc, b, LAG_SLOPE) for b in df["BTC"]]
         df["proj_lag"] = BPS * df["BTC"] * df["tgt_lag"]
@@ -355,7 +396,7 @@ def main():
         # off at a 10% gap). Written this way the two tools agree at every level.
         df["lag"] = ((df["gap_lo"] if LAG_AT_LOW else df["gap_lag"]) - df["hour_avg"]) / (1 + df["hour_avg"])
         df["proj_x"] = mstx_prev * (1 + 2.0 * (df["proj"] / mstr_prev - 1))     # projected MSTX: yesterday's close moved 2x MSTR's projected move
-        df["gap_x"] = df["MSTX"] / df["proj_x"] - 1
+        df["gap_x"] = 2 * df["gap"]  # twice MSTR excess, the alert scale
         r = df.iloc[-1]; t = df.index[-1]
         btc_hour = float(r["btc_hour"])
         regime = regime_now                                                       # the daily-close gate, the same one the crossing push uses
@@ -363,8 +404,8 @@ def main():
         print("%s  MSTR %.2f  BTC %s  STRC %.2f  mNAV %.3f  target %.3f  projected %.2f  gap %+.2f%%  lag %s  BTC 1h %+.2f%%  BTC %s its 50-day  (inputs: %s)" % (
             t.strftime("%Y-%m-%d %H:%M"), r["MSTR"], format(round(btc_last), ","), strc, mnav, r["target"], r["proj"], 100 * r["gap"],
             ("%+.2f%%" % (100 * r["lag"])) if not math.isnan(r["lag"]) else "n/a", 100 * btc_hour, regime, cfg["_source"]))
-        core = ("MSTX <b>$%.2f</b> vs projected <b>$%.2f</b> (gap <b>%+.1f%%</b>)\n"
-                "MSTR $%.2f vs projected $%.2f (gap %+.1f%%, lag %s)\n"
+        core = ("MSTX <b>$%.2f</b> vs projected <b>$%.2f</b> (excess in 2x MSTR terms <b>%+.1f%%</b>)\n"
+                "MSTR $%.2f vs projected $%.2f (excess %+.1f%%, lag %s)\n"
                 "BTC $%s (%+.1f%% last hour) · STRC $%.2f · mNAV %.3f vs target %.3f\n"
                 "BTC is %s its 50-day ($%s) · holdings %s\n"
                 "Ladder: <b>%s</b> band on the monthly close (%sq) · live %.1fq") % (r["MSTX"], r["proj_x"], 100 * r["gap_x"], r["MSTR"], r["proj"], 100 * r["gap"],
@@ -420,14 +461,14 @@ def main():
             if not last_t or datetime.fromisoformat(last_t).date() != last_day: return True          # first time today
             if last_g is not None and beyond(gap_now, float(last_g)): return True                      # a full point further
             return (t - datetime.fromisoformat(last_t)) >= timedelta(minutes=60)                      # still there an hour later
-        g = float(r["gap_x"])          # the MSTX gap, matching the indicator's cheap and rich lines
+        g = float(r["gap_x"])          # twice MSTR excess, matching the indicator lines
         try:
             if g <= CHEAP_X and level_due("cheap", g, lambda now, last: now <= last - 0.01) and GATE and regime != "above":
                 state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; record("cheap", muted=True); print("cheap muted: BTC below its 50-day")
             elif g <= CHEAP_X and level_due("cheap", g, lambda now, last: now <= last - 0.01):
-                rule = ("<b>CHEAP, swing trade.</b> BTC is above its 50-day, the state where cheap closed with MSTR rising (+5.9% MSTR over 5 days in the backtest).\n<b>Play:</b> weekly call vertical from the swing sleeve: long just below the price, short at the projected price.\n<b>Exit:</b> when the gap closes to zero, or after 5 trading days, or the day BTC closes under its 50-day, whichever first." + ("\n<b>Primary:</b> the band is the sell zone; no new primary." if state.get("band") == "sell zone" else
+                rule = ("<b>CHEAP, swing trade.</b> BTC is above its 50-day. MSTR excess is below its recent premium quartile.\n<b>Play:</b> weekly call vertical from the swing sleeve: long just below the price, short at the projected price.\n<b>Exit:</b> when the gap closes to zero, or after 5 trading days, or the day BTC closes under its 50-day, whichever first." + ("\n<b>Primary:</b> the band is the sell zone; no new primary." if state.get("band") == "sell zone" else
                                 "\n<b>Primary:</b> if this phase's primary is not on yet, Cheap is its entry day, at the phase's share of the sleeve: Phase 2 is the Jan/Dec diagonal at 70%; from Phase 3 it is the band's structure, long 12 months at 0.75 delta, short 90 days at the band ceiling.")
-                        if regime == "above" else "<b>CHEAP, but BTC is below its 50-day.</b> The weaker state in the backtest; the gate is off, so this is context only.")
+                        if regime == "above" else "<b>CHEAP, but BTC is below its 50-day.</b> The gate is off, so this is context only.")
                 push("Cheap %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n" + rule); state["last_cheap_alert"] = t.isoformat(); state["last_cheap_gap"] = g; fired.append("cheap"); record("cheap")
         except Exception as exc:
             failed('Cheap', exc)
@@ -441,7 +482,7 @@ def main():
                 # no STRC in it (-4.36% vs -5.05%). The two extreme episodes went the wrong way too: STRC 88.22 was
                 # followed by MSTR beating BTC by 8.2 points, STRC 99.74 by losing 16.1. The arbitrage is real economics;
                 # it is not a detectable edge in fourteen months of price data.
-                push("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH.</b> MSTX is ahead of projected. BTC is %s its 50-day. The fitted gap quartile sets this line. Rich is not a sell on its own.\n<b>STRC $%.2f, %+.1f%% to par.</b>\n<b>Play:</b> no new primary while Rich is on. A short vertical from the swing sleeve is optional; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
+                push("Rich %+.1f%% MSTX" % (100 * float(r["gap_x"])), core + "\n\n<b>RICH.</b> MSTR excess is above its Rich line. BTC is %s its 50-day. The recent premium excess quartile sets this line. Rich is not a sell on its own.\n<b>STRC $%.2f, %+.1f%% to par.</b>\n<b>Play:</b> no new primary while Rich is on. A short vertical from the swing sleeve is optional; in the IBIT band Rich is the sell.\n<b>Exit:</b> when the gap returns to zero or after 5 trading days." % (regime, strc, strc - 100.0), sound="pushover"); state["last_rich_alert"] = t.isoformat(); state["last_rich_gap"] = g; fired.append("rich"); record("rich")
         except Exception as exc:
             failed('Rich', exc)
         try:

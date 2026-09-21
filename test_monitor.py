@@ -47,6 +47,7 @@ def scenario(monkeypatch):
         btc = pd.Series(100000.0, index=pd.date_range("2026-09-18 08:00", periods=200, freq="min", tz=monitor.NY))
         mstx = pd.Series(100.0, index=index)
         mstx.iloc[-1] = 121.0
+        mstr.iloc[-1, 0] = 110.5  # Rich uses twice MSTR excess, not the fund tracking gap.
         data = {"MSTR": mstr, "BTC-USD": btc, "MSTX": mstx}
         monkeypatch.setattr(monitor, "bars", lambda ticker, **kwargs: data[ticker].copy())
         daily_index = pd.date_range(end=pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1), periods=130)
@@ -263,6 +264,7 @@ def test_gap_centre_thresholds_leave_lag_unchanged(config, cheap, rich):
 def test_centred_and_legacy_alerts(scenario, monkeypatch, config, mstx, expected):
     monkeypatch.setattr(monitor, "load_config", lambda: {"_source": "test", **config})
     scenario.data["MSTX"].iloc[-1] = mstx
+    scenario.data["MSTR"].iloc[-1, 0] = 100*(1+(mstx/100-1)/2)
     assert monitor.main() == 0
     kinds = [row["kind"] for row in json.loads(scenario.ledger.read_text())]
     assert "lag" in kinds
@@ -313,11 +315,92 @@ def test_pine_sync_fits_prices_preserves_lag_and_newlines(tmp_path, monkeypatch)
         assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
         if Path(path).name == "mstx_projected.pine":
             assert 'input.float(0.0125, "Lag slope' in text
-            assert 'input.float(-17, "Cheap line, MSTX' in text
-            assert 'input.float(20, "Rich line, MSTX' in text
+            assert 'input.float(%g, "Cheap line, MSTX' % (200*config['cheap_threshold']) in text
+            assert 'input.float(%g, "Rich line, MSTX' % (200*config['rich_threshold']) in text
         else:
             assert 'input.float(0.025, "Legacy lag slope' in text
-            assert 'input.float(-8.5, "Cheap line' in text
-            assert 'input.float(10, "Rich line' in text
+            assert 'input.float(%g, "Cheap line' % (100*config['cheap_threshold']) in text
+            assert 'input.float(%g, "Rich line' % (100*config['rich_threshold']) in text
         assert 'lagBase(strc) + lagSlope * (btc - 75000) / 2500' in text
     assert not monitor.sync_pine(900000, 500)
+
+
+@pytest.fixture
+def premium_value():
+    return {"n": 10, "average": -.04, "from": "2026-09-04", "to": "2026-09-18",
+            "p10": -.065, "p25": -.044, "p75": .027, "p90": .06}
+
+
+def test_premium_fetch_once_saves_and_falls_back(monkeypatch, premium_value):
+    from io import BytesIO
+    state={}
+    fetch=Mock(return_value=BytesIO(json.dumps({"premium":premium_value}).encode()))
+    monkeypatch.setattr(monitor.urllib.request,"urlopen",fetch)
+    assert monitor.load_premium(state)==premium_value
+    fetch.assert_called_once()
+    assert fetch.call_args.kwargs['timeout']==4
+    assert fetch.call_args.args[0].full_url==monitor.MODEL_URL
+    assert state['premium_last']==premium_value
+    fetch.side_effect=TimeoutError('offline')
+    assert monitor.load_premium(state)==premium_value
+    assert monitor.load_premium({})['average']==0
+
+
+@pytest.mark.parametrize('bad', [None, {}, {"average":float('nan')}, {"n":0}, {"p75":-.10}])
+def test_invalid_premium_keeps_saved(monkeypatch,premium_value,bad):
+    from io import BytesIO
+    payload=None if bad is None else {**premium_value,**bad}
+    if bad=={}: payload={}
+    monkeypatch.setattr(monitor.urllib.request,'urlopen',lambda *a,**k:BytesIO(json.dumps({'premium':payload}).encode()))
+    state={'premium_last':premium_value.copy()}
+    assert monitor.load_premium(state)==premium_value
+    assert state['premium_last']==premium_value
+
+
+@pytest.mark.parametrize('excess,kind',[(-.044001,'cheap'),(-.043999,None),(.026999,None),(.027001,'rich')])
+def test_alerts_use_additive_excess_and_twice_mstr_lines(scenario,monkeypatch,premium_value,excess,kind):
+    fetch=Mock(return_value=premium_value)
+    monkeypatch.setattr(monitor,'load_premium',fetch)
+    scenario.data['MSTR'].iloc[-1,0]=100*(1+premium_value['average']+excess)
+    scenario.data['MSTX'].iloc[-1]=500  # Tracking difference cannot trip an excess alert.
+    assert monitor.main()==0
+    fetch.assert_called_once()
+    rows=json.loads(scenario.ledger.read_text())
+    swings=[r for r in rows if r['kind'] in ('cheap','rich')]
+    assert [r['kind'] for r in swings]==([kind] if kind else [])
+    assert monitor.CHEAP_X==pytest.approx(2*premium_value['p25'])
+    assert monitor.RICH_X==pytest.approx(2*premium_value['p75'])
+    if swings:
+        assert swings[0]['gap_mstx']==pytest.approx(round(excess*200,2))
+        assert swings[0]['proj']==96
+    assert monitor.LAG_SLOPE==.0125
+    assert monitor.LAG_X==-.03
+
+
+def test_pine_average_is_in_daily_mstr_context_with_completed_offset():
+    for name in monitor.PINE_FILES:
+        text=(ROOT/name).read_text()
+        assert 'ta.sma(dp, premiumN)[1]' in text
+        assert 'request.security(mstrSym, "D", priorPremium(), lookahead=barmerge.lookahead_on)' in text
+        assert 'input.int(10, "Premium sessions"' in text
+        assert '/ lineM - 1 - premiumAvg)' in text
+        assert 'lineM * (1 + premiumAvg)' in text
+
+
+
+def test_premium_survives_a_saved_state_reload(scenario,monkeypatch,premium_value):
+    from io import BytesIO
+    fetch=Mock(return_value=BytesIO(json.dumps({'premium':premium_value}).encode()))
+    monkeypatch.setattr(monitor.urllib.request,'urlopen',fetch)
+    assert monitor.main()==0
+    fetch.assert_called_once()
+    saved=json.loads(scenario.state.read_text())
+    assert saved['premium_last']==premium_value
+    fetch.reset_mock()
+    fetch.side_effect=TimeoutError('offline')
+    assert monitor.main()==0
+    fetch.assert_called_once()
+    restored=json.loads(scenario.state.read_text())
+    assert restored['premium_last']==premium_value
+    assert restored['proj_mstx']==saved['proj_mstx']
+    assert monitor.PREMIUM_AVG==-.04

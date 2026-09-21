@@ -4,12 +4,12 @@
   "btc_slope_per_2500": 0.030355691245129924,
   "lag_threshold": -0.015,
   "gap_centre": 0,
-  "cheap_threshold": -0.085,
-  "rich_threshold": 0.1,
+  "cheap_threshold": -0.04382947459634926,
+  "rich_threshold": 0.026958919900746836,
   "btc_hour_move_floor": -0.01,
   "regime_gate": true,
   "updated": "2026-09-21",
-  "note": "Fair value uses a fitted Bitcoin line and a nonpositive STRC shortfall term below par. Cheap and Rich are the fitted gap quartiles rounded to half a percent in MSTR terms. MSTX alert thresholds are twice these values. The lag signal is unchanged.",
+  "note": "Fair value uses a fitted Bitcoin line and a nonpositive STRC shortfall term below par. Fair value carries the last 10 completed sessions average premium. Cheap and Rich are excess premium quartiles in MSTR terms. MSTX alert thresholds are twice these values. The lag signal is unchanged.",
   "lag_at_low": true,
   "lag_watch": -0.01,
   "lag_slope": 0.0125,
@@ -68,5 +68,15 @@
     "walk_forward_note": "At least 120 earlier sessions per fit. Origin excluded from training. Endpoint Bitcoin and STRC given. Origin Bitcoin per share held fixed. Absolute miss as percent of actual MSTR. Overlapping horizons. 28 calendar day gap half life. mNAV cap 2."
   },
   "gap_half_life_days": 28,
-  "lookup_note": "Projected uses the fitted line capped at mNAV 2. Best estimate carries today's gap with a 28 calendar day half life."
+  "lookup_note": "Projected uses the fitted line capped at mNAV 2. Best estimate carries today's gap with a 28 calendar day half life.",
+  "premium": {
+    "n": 10,
+    "p25": -0.04382947459634926,
+    "p75": 0.026958919900746836,
+    "p10": -0.06655213621042479,
+    "p90": 0.05963410756517092,
+    "median_abs_pct": 3.6501377255718115,
+    "mean_abs_pct": 4.4862809777598445,
+    "sessions": 277
+  }
 }
