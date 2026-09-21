@@ -241,3 +241,29 @@ def test_ladder_model_matches_the_site():
     import math
     lo, hi = monitor.ladder_price(0.01, noon(2026, 12, 31)), monitor.ladder_price(99.99, noon(2026, 12, 31))
     assert math.isfinite(lo) and math.isfinite(hi) and lo < monitor.ladder_price(0.1, noon(2026, 12, 31)) < monitor.ladder_price(99.9, noon(2026, 12, 31)) < hi, "tails extrapolate like the site"
+
+
+@pytest.mark.parametrize("config, cheap, rich", [({}, -0.06, 0.08), ({"gap_centre": 0}, -0.06, 0.08), ({"gap_centre": 0.04}, 0.02, 0.16)])
+def test_gap_centre_thresholds_leave_lag_unchanged(config, cheap, rich):
+    monitor.configure(config)
+    assert monitor.CHEAP_X == pytest.approx(cheap)
+    assert monitor.RICH_X == pytest.approx(rich)
+    assert monitor.LAG_X == pytest.approx(-0.03)
+    assert monitor.LAG_WATCH == pytest.approx(-0.01)
+    assert monitor.LAG_SLOPE == pytest.approx(0.0125)
+
+
+@pytest.mark.parametrize("config, mstx, expected", [
+    ({}, 93.9, "cheap"), ({}, 94.1, None),
+    ({}, 107.9, None), ({}, 108.1, "rich"),
+    ({"gap_centre": 0.04}, 101.9, "cheap"), ({"gap_centre": 0.04}, 102.1, None),
+    ({"gap_centre": 0.04}, 115.9, None), ({"gap_centre": 0.04}, 116.1, "rich"),
+    ({"gap_centre": 0.04}, 110.0, None),
+])
+def test_centred_and_legacy_alerts(scenario, monkeypatch, config, mstx, expected):
+    monkeypatch.setattr(monitor, "load_config", lambda: {"_source": "test", **config})
+    scenario.data["MSTX"].iloc[-1] = mstx
+    assert monitor.main() == 0
+    kinds = [row["kind"] for row in json.loads(scenario.ledger.read_text())]
+    assert "lag" in kinds
+    assert [kind for kind in kinds if kind in ("cheap", "rich")] == ([expected] if expected else [])

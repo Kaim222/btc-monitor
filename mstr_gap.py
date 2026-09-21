@@ -105,7 +105,8 @@ def configure(config, held=None, shares=None, source="none"):
     BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
     SLOPE = float(cfg.get("btc_slope_per_2500", 0.025))            # fallbacks mirror the live config; a failed fetch must not change the rules
     LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.03)), float(cfg.get("rich_threshold", 0.04))
-    LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * CHEAP, 2 * RICH   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
+    centre = float(cfg.get("gap_centre", 0))
+    LAG_X, CHEAP_X, RICH_X = 2 * LAG, 2 * (centre + CHEAP), 2 * (centre + RICH)   # MSTX terms: the indicator draws all three lines on the MSTX gap, so the tests run there too
     BTC_HOLD = float(cfg.get("btc_hour_move_floor", -0.01))
     GATE = bool(cfg.get("regime_gate", True))          # LAG and CHEAP only: the buy signals want BTC above its 50-day
     RICH_GATE = bool(cfg.get("rich_gate", False))      # Rich fires in either regime; it declined in both on the daily data
