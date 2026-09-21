@@ -1,19 +1,22 @@
 //@version=6
 // MSTX projected price. Put it on the MSTX chart (any intraday timeframe). Everything is in MSTX terms.
 // Projected MSTX = yesterday's MSTX close x (1 + leverage x (projected MSTR / yesterday's MSTR close - 1)),
-// where projected MSTR = BTC x (BTC held / ADSO) x target mNAV and target = STRC rule + slope x (BTC - 75,000) / 2,500.
+// where projected MSTR = BTC x (BTC held / ADSO) x target mNAV and target = fitted Bitcoin line with STRC shortfall below par and mNAV cap 2.
 // gap  = MSTX vs projected MSTX, percent (the swing signal; needs the holdings inputs).
 // lag  = MSTX's own move over the trailing window minus leverage x BTC's target-adjusted move (the day-trade signal; no holdings needed).
 indicator("MSTX Projection", shorttitle="MSTX Projection", overlay=true, max_lines_count=100, max_labels_count=100)
 
 btcHeld   = input.float(845050, "BTC held", step=1)
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001)
-slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)   // matches data/mstr-config.json; 0.0125 was the two-year number
+slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001)
+fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001)
+fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001)
+fitPar    = input.float(100, "STRC par", step=1)
 lev       = input.float(2.0, "Fund leverage (MSTX = 2)", step=0.5)
 lagSlope  = input.float(0.0125, "Lag slope per $2,500 of BTC (the lag runs on its own)", step=0.0025)
 lagT      = input.float(-3, "Lag alert, MSTX % vs the trailing window", step=0.5)
-cheapT    = input.float(2, "Cheap line, MSTX % under projection", step=0.5)
-richT     = input.float(16, "Rich line, MSTX % over projection", step=0.5)
+cheapT    = input.float(-17, "Cheap line, MSTX % under projection", step=0.5)
+richT     = input.float(20, "Rich line, MSTX % over projection", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 minMins   = input.int(20, "Minutes after the open before the lag can fire", minval=5)
@@ -49,7 +52,7 @@ if session.ismarket
     xLast := close
     mLast := mstrI
 
-strcRule(s) =>
+lagBase(s) =>
     s >= 97.5 ? 0.90 :
       s >= 95 ? 0.875 + (s - 95) * 0.01 :
       s >= 92.5 ? 0.85 + (s - 92.5) * 0.01 :
@@ -57,7 +60,7 @@ strcRule(s) =>
       s >= 82.5 ? 0.80 + (s - 82.5) * 0.005 :
       math.max(0.775, 0.775 + (s - 77.5) * 0.005)
 
-target = strcRule(strc) + slope * (btc - 75000) / 2500
+target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc) + slope * (btc - 75000) / 2500)
 bps    = btcHeld / (sharesM * 1e6)
 projM  = btc * bps * target                                       // projected MSTR (internal)
 projX  = xPrev * (1 + lev * (projM / mstrPrev - 1))               // projected MSTX
@@ -67,7 +70,7 @@ gap    = (close / projX - 1) * 100                                // MSTX vs pro
 // The window is in minutes so it means the same on 1, 5 and 15 minute charts. In the first hour it averages the bars since the open.
 winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
 minBars = math.max(1, math.round(minMins * 60 / timeframe.in_seconds()))
-tgtLag  = strcRule(strc) + lagSlope * (btc - 75000) / 2500       // the lag has its own slope; the projected line keeps slope
+tgtLag  = lagBase(strc) + lagSlope * (btc - 75000) / 2500       // the lag has its own slope; the projected line keeps slope
 ratio   = mstrI / (btc * tgtLag)                                  // MSTR over what it should track; holdings cancel
 var float sumR = 0.0
 var int   cnt  = 0

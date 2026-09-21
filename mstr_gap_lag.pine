@@ -1,16 +1,19 @@
 //@version=6
 // MSTR gap and lag vs Alex's projected price. Put it on any intraday chart (MSTR or MSTX); it pulls MSTR, BTC and STRC itself.
-// projected MSTR = BTC x (BTC held / ADSO) x target mNAV, target = STRC rule + slope x (BTC - 75,000) / 2,500
+// projected MSTR = BTC x (BTC held / ADSO) x target mNAV, target = fitted Bitcoin line with STRC shortfall below par and mNAV cap 2
 // gap = MSTR / projected - 1 (needs the holdings inputs; the swing signal).
 // lag = the MSTR-over-BTC ratio vs its own average over the trailing window (holdings cancel out; the day-trade signal).
 indicator("MSTR gap + lag (Kaim)", shorttitle="MSTR gap", overlay=false, format=format.percent, precision=2)
 
 btcHeld   = input.float(845050, "BTC held", step=1, tooltip="Swing lines only. The lag signal does not use it.")
 sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001, tooltip="Swing lines only. The lag signal does not use it.")
-slope     = input.float(0.025, "Target mNAV slope per $2,500 of BTC", step=0.0025)
+slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001)
+fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001)
+fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001)
+fitPar    = input.float(100, "STRC par", step=1)
 lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1)
-cheapT    = input.float(-3.0, "Cheap line (% under projection)", step=0.5)
-richT     = input.float(4.0, "Rich line (% over projection)", step=0.5)
+cheapT    = input.float(-8.5, "Cheap line (% under projection)", step=0.5)
+richT     = input.float(10, "Rich line (% over projection)", step=0.5)
 btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
@@ -23,7 +26,7 @@ btc  = request.security(btcSym, timeframe.period, close)
 strcLive = request.security(strcSym, "D", close)
 strc = strcMan > 0 ? strcMan : strcLive
 
-strcRule(s) =>
+lagBase(s) =>
     s >= 97.5 ? 0.90 :
       s >= 95 ? 0.875 + (s - 95) * 0.01 :
       s >= 92.5 ? 0.85 + (s - 92.5) * 0.01 :
@@ -35,13 +38,16 @@ strcRule(s) =>
 winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
 
 // swing signal: needs holdings
-target = strcRule(strc) + slope * (btc - 75000) / 2500
+target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc) + slope * (btc - 75000) / 2500)
 bps    = btcHeld / (sharesM * 1e6)
 proj   = btc * bps * target
 gap    = (mstr / proj - 1) * 100
 
 // day-trade signal: holdings cancel, so this part never needs updating
-ratio   = mstr / (btc * target)
+// Keep this indicator's original independent lag calibration.
+lagSlope  = input.float(0.025, "Legacy lag slope per $2,500 of BTC", step=0.0025)
+tgtLag = lagBase(strc) + lagSlope * (btc - 75000) / 2500
+ratio   = mstr / (btc * tgtLag)
 ratioAv = ta.sma(ratio[1], winBars)
 lag     = (ratio / ratioAv - 1) * 100
 btcMove = (btc / btc[winBars] - 1) * 100
