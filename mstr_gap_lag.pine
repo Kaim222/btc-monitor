@@ -5,8 +5,8 @@
 // lag = the MSTR-over-BTC ratio vs its own average over the trailing window (holdings cancel out; the day-trade signal).
 indicator("MSTR gap + lag (Kaim)", shorttitle="MSTR gap", overlay=false, format=format.percent, precision=2)
 
-btcHeld   = input.float(845050, "BTC held", step=1, tooltip="Swing lines only. The lag signal does not use it.")
-sharesM   = input.float(450.112, "Assumed diluted shares (M)", step=0.001, tooltip="Swing lines only. The lag signal does not use it.")
+btcHeld   = input.float(846000, "BTC held", step=1, tooltip="Swing lines only. The lag signal does not use it.")
+sharesM   = input.float(450.108, "Assumed diluted shares (M)", step=0.001, tooltip="Swing lines only. The lag signal does not use it.")
 slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001)
 fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001)
 fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001)
