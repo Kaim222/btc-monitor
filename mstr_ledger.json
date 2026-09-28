@@ -314,5 +314,19 @@
     "rel_60m": 1.13,
     "mstx_60m": 4.06,
     "scored": true
+  },
+  {
+    "kind": "watch",
+    "muted": false,
+    "time": "2026-09-28T10:35:00-04:00",
+    "mstr": 156.57,
+    "btc": 83344.69,
+    "proj": 156.55,
+    "gap": 0.01,
+    "lag": -1.01,
+    "regime": "above",
+    "mstx": 19.08,
+    "proj_mstx": 19.18,
+    "gap_mstx": 0.02
   }
 ]
