@@ -362,7 +362,15 @@ def main():
         df["BTC"] = df["BTC"].ffill(); df["MSTX"] = df["MSTX"].ffill(); df = df.dropna()
         df["btc_hour"] = btc_hour_series.reindex(df.index, method="ffill", tolerance=pd.Timedelta(minutes=5))
         df = df[(df.index.time >= datetime.strptime("09:30", "%H:%M").time()) & (df.index.time <= datetime.strptime("16:00", "%H:%M").time())]
-        score_ledger(df, ledger)
+        # the scorer gets five days of BTC: BTC's two-day window is calendar days, so on a Monday it no longer reaches Friday's session and a Friday
+        # row the last run missed was never scored (9/18). The mapping below keeps reading df, the same two-day window as before.
+        try:
+            sc = pd.concat([mstr.rename("MSTR"), bars("BTC-USD", period="5d").sort_index().rename("BTC"), mstx.rename("MSTX")], axis=1, sort=False).sort_index()
+            sc["BTC"] = sc["BTC"].ffill(); sc["MSTX"] = sc["MSTX"].ffill(); sc = sc.dropna()
+            sc = sc[(sc.index.time >= datetime.strptime("09:30", "%H:%M").time()) & (sc.index.time <= datetime.strptime("16:00", "%H:%M").time())]
+        except Exception:
+            sc = df
+        score_ledger(sc, ledger)
         last_day = df.index[-1].date()
         prev = df[df.index.date < last_day]                      # yesterday's last regular bar sets the MSTX mapping
         mstr_prev = float(prev["MSTR"].iloc[-1]) if len(prev) else float(df["MSTR"].iloc[0])
