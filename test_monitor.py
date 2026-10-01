@@ -417,6 +417,9 @@ def test_pine_average_is_in_daily_mstr_context_with_completed_offset():
     for name in monitor.PINE_FILES:
         text=(ROOT/name).read_text()
         assert 'ta.sma(dp, premiumN)[1]' in text
+        # each session pairs with BTC's close of the same UTC day; lookahead off paired it with the day before (2026-10-01)
+        assert 'db = request.security(btcSym, "D", close, lookahead=barmerge.lookahead_on)' in text
+        assert 'ds = request.security(strcSym, "D", close, lookahead=barmerge.lookahead_on)' in text
         assert 'request.security(mstrSym, "D", priorPremium(), lookahead=barmerge.lookahead_on)' in text
         assert 'input.int(10, "Premium sessions"' in text
         assert '/ lineM - 1 - premiumAvg)' in text
