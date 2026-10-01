@@ -3,7 +3,9 @@ import ast
 import json
 from pathlib import Path
 import re
+import shutil
 import socket
+import subprocess
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -452,6 +454,9 @@ def test_loop_running_gate():
     assert monitor.loop_running(runs, 100) is False               # the oldest in-progress run is the loop
     assert monitor.loop_running([{"databaseId": 90, "status": "completed"}]) is False
     assert monitor.loop_running("not a list") is False and monitor.loop_running([]) is False
+    test = [{"databaseId": 90, "status": "in_progress", "displayTitle": "MSTR Session Loop (test)"}]
+    assert monitor.loop_running(test) is False and monitor.loop_running(test, 100) is False   # a dry or forced run never holds the slot
+    assert monitor.loop_running(test + [{"databaseId": 95, "status": "in_progress", "displayTitle": "MSTR Session Loop"}], 100) is True
 
 
 def test_in_session_bounds():
@@ -518,3 +523,66 @@ def test_session_loop_survives_a_crashing_check(scenario, monkeypatch):
         return 0
     rc = monitor.session_loop(run_once=check, commit=lambda: None, now_fn=clock.now, clock=clock.mono, sleep=clock.sleep, max_iter=3, budget_min=330)
     assert len(n) == 3 and rc == 0
+
+
+def test_session_loop_budget_runs_from_process_start(scenario, monkeypatch):
+    monkeypatch.setattr(monitor, "FORCE", False)
+    clock, n = FakeClock("2026-10-01 09:00"), []          # the 13:00 UTC starter in summer waits 35 minutes for the open
+    monitor.session_loop(run_once=lambda: n.append(clock.now()) or 0, commit=lambda: None, now_fn=clock.now,
+                         clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330)
+    assert n[0].strftime("%H:%M") == "09:35" and clock.t <= 330 * 60 + 75             # ends inside timeout-minutes 350, not at 15:05
+    clock, n = FakeClock("2026-10-01 10:35"), []          # a loop started after about 10:30 runs to the close
+    monitor.session_loop(run_once=lambda: n.append(clock.now()) or 0, commit=lambda: None, now_fn=clock.now,
+                         clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330)
+    assert n[-1].strftime("%H:%M") in ("15:59", "16:00")
+
+
+def test_session_loop_settles_hands_over_and_keeps_a_failed_push_dirty(scenario, monkeypatch):
+    monkeypatch.setattr(monitor, "FORCE", False)
+    def run(pushed):
+        clock, events, peers = FakeClock("2026-10-01 11:00"), [], iter([False, False, True])
+        monitor.session_loop(run_once=lambda: events.append("check") or 0, commit=lambda: events.append("commit") or (None if pushed else False),
+                             now_fn=clock.now, clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330,
+                             older_loop=lambda: next(peers), before_first=lambda: events.append("settle"))
+        return events
+    # settle once before the first check; the third peer check finds an older loop, so the loop hands over after two checks,
+    # committing the second check on the way out
+    assert run(True) == ["settle", "check", "commit", "check", "commit"]
+    clock, events, peers = FakeClock("2026-10-01 11:00"), [], iter([False, True])
+    monitor.session_loop(run_once=lambda: events.append("check") or 0, commit=lambda: events.append("commit") or False,
+                         now_fn=clock.now, clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330,
+                         older_loop=lambda: next(peers), before_first=lambda: None)
+    assert events == ["check", "commit", "commit"]        # the first check's push failed, so it stays dirty and is retried on the way out
+
+
+@pytest.mark.skipif(not (shutil.which("bash") and shutil.which("git")), reason="needs bash and git")
+def test_commit_script_moves_only_the_pine_default_edits_and_fails_loudly():
+    """sync_pine's edit goes over as a patch, so an indicator code push that lands mid-run survives (10/1, 1d38e010)."""
+    bash = shutil.which("bash")             # a full path: on Windows a bare "bash" can resolve to WSL before PATH
+    script = (ROOT / ".github" / "workflows" / "commit_state.sh").read_text()
+    with tempfile.TemporaryDirectory(prefix=".monitor-test-", dir=ROOT, ignore_cleanup_errors=True) as folder:
+        top = Path(folder); origin, run, other = top / "origin.git", top / "run", top / "other"
+        def git(*args, cwd=top): return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+        git("init", "-q", "--bare", "-b", "main", str(origin))
+        pine = 'input.float(100, "BTC held")\n// body v1\nplot(close)\n'
+        for clone in (other, run):
+            git("clone", "-q", str(origin), str(clone))
+            for k, v in (("core.autocrlf", "false"), ("user.name", "t"), ("user.email", "t@t")): git("config", k, v, cwd=clone)
+            if clone == other:
+                (other / "mstr_projected.pine").write_text(pine, newline="\n")
+                (other / "mstr_state.json").write_text('{"last_run": "old"}\n', newline="\n")
+                git("add", ".", cwd=other); git("commit", "-q", "-m", "seed", cwd=other); git("push", "-q", "origin", "HEAD:main", cwd=other)
+        # the run: sync_pine moves an input default and the check writes state; meanwhile an indicator code push lands on main
+        (run / "mstr_projected.pine").write_text(pine.replace("100", "200"), newline="\n")
+        (run / "mstr_state.json").write_text('{"last_run": "new"}\n', newline="\n")
+        (other / "mstr_projected.pine").write_text("// header\n" + pine.replace("body v1", "body v2"), newline="\n")   # next line and an offset
+        git("commit", "-q", "-am", "code", cwd=other); git("push", "-q", "origin", "HEAD:main", cwd=other)
+        r = subprocess.run([bash, "-c", script], cwd=run, capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        main_pine = git("show", "main:mstr_projected.pine", cwd=origin)
+        assert "body v2" in main_pine and 'input.float(200, "BTC held")' in main_pine     # both changes reach main
+        assert '"new"' in git("show", "main:mstr_state.json", cwd=origin)
+        (run / "mstr_state.json").write_text('{"last_run": "newer"}\n', newline="\n")
+        git("remote", "set-url", "origin", str(top / "missing.git"), cwd=run)
+        r = subprocess.run([bash, "-c", script], cwd=run, capture_output=True, text=True)
+        assert r.returncode == 1 and "not pushed after 3 tries" in r.stdout                 # a push that never lands is not reported as success

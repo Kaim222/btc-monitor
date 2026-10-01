@@ -572,6 +572,9 @@ def loop_running(runs, my_id=None):
     the loop and the newer exits; without it (the 5 minute run) any loop in progress means stand down, one writer at a time."""
     for r in runs if isinstance(runs, list) else []:
         if not isinstance(r, dict) or r.get("status") != "in_progress": continue
+        # A test run (dry_run or force) sends nothing and commits nothing, so it never holds the writer slot. Counting one
+        # silenced the 5 minute run and every starter until 16:00 while the dry loop wrote nothing (10/1 review).
+        if "(test)" in str(r.get("displayTitle") or ""): continue
         try: rid = int(r.get("databaseId"))
         except (TypeError, ValueError): continue
         if my_id is None or rid < int(my_id): return True
@@ -585,18 +588,51 @@ def commit_state(script):
     """Commit state, ledger and pine files with the scheduled run's own fetch, reset, ledger-merge and retry logic."""
     if os.environ.get("LOOP_NO_COMMIT"): print("commit skipped (LOOP_NO_COMMIT)"); return False
     r = subprocess.run(["bash", "-c", script])
-    return r.returncode == 0
+    return r.returncode == 0          # the script exits 1 when three pushes failed, so the loop keeps the state dirty
 
-def session_loop(run_once=None, commit=None, now_fn=None, clock=time.monotonic, sleep=time.sleep, max_iter=None, budget_min=None):
+def _gh_in_progress(workflow):
+    """In-progress runs of one of this repo's workflows (gh, GH_TOKEN), or None when the API cannot be read."""
+    try:
+        r = subprocess.run(["gh", "run", "list", "--workflow", workflow, "--status", "in_progress", "--limit", "50",
+                            "--json", "databaseId,status,displayTitle"], capture_output=True, text=True, timeout=60)
+        runs = json.loads(r.stdout) if r.returncode == 0 else None
+        return runs if isinstance(runs, list) else None
+    except Exception:
+        return None
+
+def older_loop_running():
+    """Asked before every check. Two loops can both pass the start gate (an older run was still queued when the newer one
+    looked), so the newer one hands over as soon as it sees the older in progress: one writer again within one period."""
+    runs = _gh_in_progress("mstr_loop.yml")
+    if runs is None: print("loop: peer check could not read the runs API, carrying on"); return False
+    return loop_running(runs, os.environ.get("GITHUB_RUN_ID") or 0)
+
+def settle(sleep=time.sleep, clock=time.monotonic, wait_s=180):
+    """Before the first check: let a 5 minute run that passed its gate before this loop started finish and push, then
+    start from main's newest state, so the first check cannot repeat an alert whose cooldown landed after the checkout."""
+    t = clock()
+    while clock() - t < wait_s:
+        runs = _gh_in_progress("mstr_gap.yml")
+        if not runs: break
+        print("loop: a 5 minute run is in progress, waiting for its commit", flush=True); sleep(10)
+    r = subprocess.run(["bash", "-c", "git fetch -q origin main && git reset -q --hard origin/main"])
+    print("loop: starting from origin/main" if r.returncode == 0 else "loop: could not refresh to origin/main, starting from the checkout")
+
+def session_loop(run_once=None, commit=None, now_fn=None, clock=time.monotonic, sleep=time.sleep, max_iter=None, budget_min=None,
+                 older_loop=None, before_first=None):
     """Check every LOOP_PERIOD_S seconds until 16:00 New York or the time budget, whichever is first.
 
     Commits on the first check, then at least every LOOP_COMMIT_S seconds, and at once after any push or new ledger row so a
     cooldown is on main before anything else can read it. Returns the last check's exit code."""
+    start = clock()                   # the budget runs from process start, open wait included, so it ends inside timeout-minutes
     run_once = run_once or main
     now_fn = now_fn or (lambda: datetime.now(NY))
     if commit is None:
         script = open(COMMIT_SCRIPT).read()            # read once: the commit step resets the checkout to origin/main
         commit = lambda: commit_state(script)
+    in_actions = bool(os.environ.get("GITHUB_RUN_ID"))
+    older_loop = older_loop or (older_loop_running if in_actions else (lambda: False))
+    before_first = before_first or ((lambda: settle(sleep, clock)) if in_actions else (lambda: None))
     max_iter = int(os.environ.get("LOOP_MAX_ITER") or 0) if max_iter is None else max_iter
     budget = 60 * float(os.environ.get("LOOP_BUDGET_MIN") or LOOP_BUDGET_MIN) if budget_min is None else 60 * budget_min
     now = now_fn()
@@ -604,13 +640,16 @@ def session_loop(run_once=None, commit=None, now_fn=None, clock=time.monotonic, 
         opens = now.replace(hour=9, minute=35, second=0, microsecond=0)
         if timedelta(0) < opens - now <= timedelta(minutes=LOOP_OPEN_WAIT_MIN):
             print("waiting %d s for the 9:35 open" % (opens - now).total_seconds()); sleep((opens - now).total_seconds())
-    start, last_commit, n, rc, dirty = clock(), None, 0, 0, False
+    last_commit, n, rc, dirty = None, 0, 0, False
     while True:
         now = now_fn()
         if not FORCE and not in_session(now): print("loop: session over (%s NY)" % now.strftime("%a %H:%M:%S")); break
         if clock() - start >= budget: print("loop: time budget of %d minutes reached" % (budget // 60)); break
         if max_iter and n >= max_iter: print("loop: %d iterations done" % n); break
-        t0, pushes, rows = clock(), PUSHES[0], _ledger_rows()
+        t0 = clock()
+        if n == 0: before_first()
+        if older_loop(): print("loop: an older loop is running, handing over", flush=True); break
+        pushes, rows = PUSHES[0], _ledger_rows()
         n += 1
         print("loop: check %d at %s NY" % (n, now.strftime("%H:%M:%S")), flush=True)
         try: rc = run_once()
@@ -619,7 +658,7 @@ def session_loop(run_once=None, commit=None, now_fn=None, clock=time.monotonic, 
         alert = PUSHES[0] != pushes or _ledger_rows() != rows
         if alert or last_commit is None or clock() - last_commit >= LOOP_COMMIT_S:
             print("loop: committing (%s)" % ("alert or new ledger row" if alert else "first check" if last_commit is None else "interval"), flush=True)
-            commit(); last_commit, dirty = clock(), False
+            dirty = commit() is False; last_commit = clock()     # a failed push stays dirty: retried next interval and at shutdown
         sleep(max(5.0, LOOP_PERIOD_S - (clock() - t0)))
     if dirty: commit()
     return rc
