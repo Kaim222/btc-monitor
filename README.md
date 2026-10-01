@@ -17,11 +17,14 @@ Watch rows are ledger-only observations, with no push.
 
 Files:
 - `mstr_gap.py`: data fetches, isolated alerts, retrying delivery, and final state/ledger saves.
-- `mstr_config.json`: local fallback for the live signal configuration.
+- `mstr_config.json`: local fallback for the live signal configuration. The live config and premium are read from the ladder
+  site's GitHub Pages (`kaim222.github.io/btc-quantile-ladder/data/`); the ladder repo is private, so its raw GitHub links 404.
 - `mstr_state.json`: active state and cached holdings/STRC.
 - `mstr_ledger.json`: signal observations and later performance scores.
 - `merge_ledger.py`: merges concurrent ledger rows, filling null fields and retaining first-seen non-null values.
-- `mstr_gap_lag.pine`, `mstr_projected.pine`, `mstx_projected.pine`: TradingView indicators.
+- `mstr_gap_lag.pine`, `mstr_projected.pine`, `mstx_projected.pine`: TradingView indicators. All three run the monitor's lag rule
+  (bar low, lag slope, 30 bars to arm, BTC's own hour, 50-day gate, 60-minute cooldown) and compute the premium from daily closes;
+  `sync_pine` rewrites the typed defaults (holdings, fit, lines, lag settings) from the live sources on every run.
 - `.github/workflows/mstr_gap.yml`: active schedule, state persistence, and failure notification.
 - `test_monitor.py`: offline reliability regression tests (`python -m pytest -q test_monitor.py`).
 - `AUDIT-alerts.json`: alert audit; signal-change recommendations are not implemented by this reliability pass.

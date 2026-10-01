@@ -313,12 +313,16 @@ def test_pine_sync_fits_prices_preserves_lag_and_newlines(tmp_path, monkeypatch)
         assert 'input.float(%s, "Fitted intercept"' % repr(config["fit"]["a"]) in text
         assert 'input.float(%s, "Target mNAV slope' % repr(config["fit"]["b"]) in text
         assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
+        # every indicator runs the monitor's lag: its own slope, its line and the BTC floor, all from the config
+        assert 'input.float(%g, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % config["lag_slope"] in text
+        assert "Legacy" not in text
+        assert 'input.float(%g, "BTC must have held' % (100*config["btc_hour_move_floor"]) in text
         if Path(path).name == "mstx_projected.pine":
-            assert 'input.float(0.0125, "Lag slope' in text
+            assert 'input.float(%g, "Lag alert, MSTX' % (200*config["lag_threshold"]) in text
             assert 'input.float(%g, "Cheap line, MSTX' % (200*config['cheap_threshold']) in text
             assert 'input.float(%g, "Rich line, MSTX' % (200*config['rich_threshold']) in text
         else:
-            assert 'input.float(0.025, "Legacy lag slope' in text
+            assert 'input.float(%g, "Lag alert (%%' % (100*config["lag_threshold"]) in text
             assert 'input.float(%g, "Cheap line' % (100*config['cheap_threshold']) in text
             assert 'input.float(%g, "Rich line' % (100*config['rich_threshold']) in text
         assert 'lagBase(strc) + lagSlope * (btc - 75000) / 2500' in text
@@ -375,6 +379,25 @@ def test_alerts_use_additive_excess_and_twice_mstr_lines(scenario,monkeypatch,pr
         assert swings[0]['proj']==96
     assert monitor.LAG_SLOPE==.0125
     assert monitor.LAG_X==-.03
+
+
+def test_pine_lag_rules_match_the_monitor():
+    """The three indicators judge the lag where and when the monitor does (the gaps found on 2026-10-01)."""
+    src = (ROOT / "mstr_gap.py").read_text()
+    config = json.loads((ROOT / "mstr_config.json").read_text())
+    assert 'rolling(60, min_periods=30)' in src and 'timedelta(minutes=60)' in src
+    for name in monitor.PINE_FILES:
+        text = (ROOT / name).read_text()
+        assert 'ratioLo = mstrLo / (btc * tgtLag)' in text and 'request.security(mstrSym, timeframe.period, low)' in text   # at MSTR's bar low
+        assert 'input.float(%g, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % config["lag_slope"] in text
+        assert 'input.int(30, "Minutes after the open before the lag can fire"' in text                                       # min_periods 30
+        assert 'request.security(btcSym, timeframe.period, close[winBars])' in text and 'btcMove = (btc / btcAgo - 1) * 100' in text   # BTC's own hour
+        assert 'request.security(btcSym, "D", close[1], lookahead=barmerge.lookahead_on)' in text                             # completed daily close
+        assert 'request.security(btcSym, "D", ta.sma(close, 50)[1], lookahead=barmerge.lookahead_on)' in text
+        assert 'input.bool(%s, "Trend gate' % str(config["regime_gate"]).lower() in text
+        assert 'input.bool(%s, "Gate the sell too' % str(config["rich_gate"]).lower() in text
+        assert 'input.int(60, "Minutes between lag alerts"' in text and 'time - lastLagT >= coolMins * 60000' in text      # the cooldown
+        assert 'alertcondition(%s, "Lag"' % ("lagBuy" if name == "mstx_projected.pine" else "buyBar") in text
 
 
 def test_pine_average_is_in_daily_mstr_context_with_completed_offset():

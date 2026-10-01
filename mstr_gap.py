@@ -30,7 +30,7 @@ Three alerts:
 
 Holdings and the assumed diluted share count come from api.strategy.com/btc/bitcoinKpis on every run (btcHoldings and
 satsPerShare; this reproduces strategy.com/shares' ADSO exactly), so Monday's 8-K flows through by itself. Thresholds and the
-slope come from the ladder site's data/mstr-config.json (fetched live from GitHub; editing that file changes both the site and
+slope come from the ladder site's data/mstr-config.json (fetched live from the site's GitHub Pages; editing that file changes both the site and
 this monitor); set btc_held or shares_m there only to override the API. A local mstr_config.json is the fallback. State in mstr_state.json. Every alert is scored on later
 runs (MSTR minus BTC, and MSTX itself, over the next 30 and 60 minutes) into mstr_ledger.json, so the rule keeps a record of itself.
 Regular session only (9:35 to 16:00 New York). Env: PUSHOVER_TOKEN, PUSHOVER_USER; without them it prints instead of
@@ -42,8 +42,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd, yfinance as yf
 
 NY = ZoneInfo("America/New_York")
-CONFIG_URL = "https://raw.githubusercontent.com/Kaim222/btc-quantile-ladder/main/data/mstr-config.json"
-MODEL_URL = "https://raw.githubusercontent.com/Kaim222/btc-quantile-ladder/main/data/mstr-model.json"
+# The ladder repo is private since 2026-09-28, so raw.githubusercontent.com returns 404 for it. GitHub Pages still
+# serves the site's data files publicly; read them there. The local mstr_config.json and the saved premium stay the fallback.
+SITE_DATA = "https://kaim222.github.io/btc-quantile-ladder/data/"
+CONFIG_URL = SITE_DATA + "mstr-config.json"
+MODEL_URL = SITE_DATA + "mstr-model.json"
 CONFIG_FILE, STATE_FILE, LEDGER_FILE = "mstr_config.json", "mstr_state.json", "mstr_ledger.json"
 FORCE, TEST = "--force" in sys.argv, "--test" in sys.argv
 
@@ -113,7 +116,8 @@ PINE_FILES = ["mstr_gap_lag.pine", "mstr_projected.pine", "mstx_projected.pine"]
 def sync_pine(held, shares_m):
     """Rewrite the indicators' default inputs from the live holdings and config, so a re-paste carries the real numbers.
 
-    Price coefficients and gap thresholds follow the fitted config. Lag settings stay independent.
+    Price coefficients and gap thresholds follow the fitted config. The lag keeps its own slope (lag_slope), and its line
+    and BTC floor follow the config too, so all three indicators carry what this monitor alerts on.
     """
     import re
     subs = [(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held))),
@@ -121,6 +125,8 @@ def sync_pine(held, shares_m):
             (r'input\.float\([0-9.]+, "Target mNAV slope per \$2,500 of BTC"', 'input.float(%s, "Target mNAV slope per $2,500 of BTC"' % (repr(SLOPE))),
             (r'input\.float\([0-9.]+, "Lag slope per \$2,500 of BTC \(the lag runs on its own\)"', 'input.float(%s, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % ("%g" % LAG_SLOPE)),
             (r'input\.float\(-?[0-9.]+, "Lag alert, MSTX % vs the trailing window"', 'input.float(%g, "Lag alert, MSTX %% vs the trailing window"' % (100 * LAG_X)),
+            (r'input\.float\(-?[0-9.]+, "Lag alert \(% vs the trailing window\)"', 'input.float(%g, "Lag alert (%% vs the trailing window)"' % (100 * LAG)),
+            (r'input\.float\(-?[0-9.]+, "BTC must have held \(% over the window, floor\)"', 'input.float(%g, "BTC must have held (%% over the window, floor)"' % (100 * BTC_HOLD)),
             (r'input\.float\(-?[0-9.]+, "Cheap line, MSTX % under projection"', 'input.float(%g, "Cheap line, MSTX %% under projection"' % (100 * CHEAP_X)),
             (r'input\.float\(-?[0-9.]+, "Rich line, MSTX % over projection"', 'input.float(%g, "Rich line, MSTX %% over projection"' % (100 * RICH_X))]
     for key, label in [("a", "Fitted intercept"), ("c", "Fitted STRC shortfall"), ("par", "STRC par")]:

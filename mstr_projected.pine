@@ -1,34 +1,62 @@
 //@version=6
 // Projected price on the price chart. Put it on MSTR or MSTX, any intraday timeframe.
-// Projected MSTR = BTC x (BTC held / ADSO) x target mNAV, target = fitted Bitcoin line with STRC shortfall below par and mNAV cap 2.
+// Projected MSTR = BTC x (BTC held / ADSO) x target mNAV x (1 + average premium of the last 10 completed sessions),
+// target = fitted Bitcoin line with STRC shortfall below par and mNAV cap 2. The premium is computed here from daily closes.
 // On an MSTX chart the projection is mapped to MSTX at 2x MSTR's move from yesterday's closes.
-// BUY marks a lag: MSTR fell 1.5% or more against BTC inside the trailing window while BTC held (holdings cancel out of this).
+// BUY marks a lag: MSTR's bar low fell 1.5% or more against its trailing hour (at the lag's own slope) while BTC held,
+// with the monitor's rules: 30 bars after the open to arm, buys only with BTC above its 50-day, 60 minutes between alerts.
 // Green background: price is under the cheap line (the swing signal). Table: the numbers.
+// Typed inputs are the values Pine cannot derive. The monitor rewrites their defaults from the live sources on every run.
 indicator("MSTR projected price (Kaim)", shorttitle="Projected", overlay=true)
 
-btcHeld   = input.float(847666, "BTC held", step=1)
-sharesM   = input.float(451.577, "Assumed diluted shares (M)", step=0.001)
-slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001)
-fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001)
-fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001)
-fitPar    = input.float(100, "STRC par", step=1)
-lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1)
-cheapT    = input.float(-4.30307, "Cheap line (% under projection)", step=0.5)
-richT     = input.float(2.64058, "Rich line (% over projection)", step=0.5)
-btcHold   = input.float(-1.0, "BTC must have held (% over the window, floor)", step=0.1)
+btcHeld   = input.float(847666, "BTC held", step=1, tooltip="api.strategy.com bitcoinKpis btcHoldings, read by the monitor every run (mstr_state.json btc_held).")
+sharesM   = input.float(451.577, "Assumed diluted shares (M)", step=0.001, tooltip="api.strategy.com bitcoinKpis: BTC held / satsPerShare (mstr_state.json shares_m).")
+slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001, tooltip="Site data/mstr-config.json fit.b, fitted 2026-09-21.")
+fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001, tooltip="Site data/mstr-config.json fit.a.")
+fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001, tooltip="Site data/mstr-config.json fit.c, per point of STRC under par.")
+fitPar    = input.float(100, "STRC par", step=1, tooltip="Site data/mstr-config.json fit.par.")
+lagSlope  = input.float(0.0125, "Lag slope per $2,500 of BTC (the lag runs on its own)", step=0.0025, tooltip="Site data/mstr-config.json lag_slope.")
+lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1, tooltip="Site data/mstr-config.json lag_threshold x 100. MSTR terms; twice this on MSTX.")
+cheapT    = input.float(-4.2816, "Cheap line (% under projection)", step=0.5, tooltip="Site data/mstr-model.json premium.p25 x 100 (excess quartile, refreshed after each close).")
+richT     = input.float(2.6075, "Rich line (% over projection)", step=0.5, tooltip="Site data/mstr-model.json premium.p75 x 100 (excess quartile, refreshed after each close).")
+btcHold   = input.float(-1, "BTC must have held (% over the window, floor)", step=0.1, tooltip="Site data/mstr-config.json btc_hour_move_floor x 100. Measured on BTC's own bars, 60 minutes back.")
 winMins   = input.int(60, "Trailing window (minutes)", minval=5)
-minMins   = input.int(20, "Minutes after the open before the lag can fire", minval=5)
+minMins   = input.int(30, "Minutes after the open before the lag can fire", minval=5, tooltip="The monitor's hour average needs 30 bars (rolling 60, min_periods 30), so its first lag is the 10:00 bar.")
+coolMins  = input.int(60, "Minutes between lag alerts", minval=1, tooltip="The monitor's lag cooldown. A muted lag starts it too.")
+useGate   = input.bool(true, "Trend gate: buys only with BTC above its 50-day", tooltip="Site data/mstr-config.json regime_gate.")
+useGateSell = input.bool(false, "Gate the sell too (Rich only below the 50-day). Off: Rich fires either way", tooltip="Site data/mstr-config.json rich_gate.")
 btcSym    = input.symbol("COINBASE:BTCUSD", "BTC symbol")
 mstrSym   = input.symbol("NASDAQ:MSTR", "MSTR symbol")
 strcSym   = input.symbol("NASDAQ:STRC", "STRC symbol")
 strcMan   = input.float(0, "STRC price override (0 = live)", step=0.01)
 
+// the window is in minutes so it means the same on 1, 5 and 15 minute charts
+winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
+minBars = math.max(1, math.round(minMins * 60 / timeframe.in_seconds()))
+
 mstr     = request.security(mstrSym, timeframe.period, close)
+mstrLo   = request.security(mstrSym, timeframe.period, low)     // MSTR's low inside each bar: the monitor measures the lag there
 btc      = request.security(btcSym, timeframe.period, close)
-strcLive = request.security(strcSym, "D", close)
-strc     = strcMan > 0 ? strcMan : strcLive
-mstrPrev = request.security(mstrSym, "D", close[1])          // yesterday's MSTR close
-chartPrev = request.security(syminfo.tickerid, "D", close[1]) // yesterday's close of the chart's own symbol
+btcAgo   = request.security(btcSym, timeframe.period, close[winBars])   // BTC an hour ago on its own bars, overnight included
+strcI    = request.security(strcSym, timeframe.period, close)
+strc     = strcMan > 0 ? strcMan : strcI
+// the gate: BTC's last completed daily close against the 50-day average of completed closes, as the monitor reads it
+btcClose = request.security(btcSym, "D", close[1], lookahead=barmerge.lookahead_on)
+btcMa50  = request.security(btcSym, "D", ta.sma(close, 50)[1], lookahead=barmerge.lookahead_on)
+btcUp    = btcClose > btcMa50
+
+// yesterday's last regular-session closes, tracked from the intraday bars (the monitor's base for the MSTX mapping;
+// a daily-timeframe lookup with [1] reads a day late on history)
+var float cLast = na
+var float mLast = na
+var float chartPrev = na
+var float mstrPrev = na
+if session.isfirstbar_regular
+    chartPrev := cLast
+    mstrPrev  := mLast
+if session.ismarket
+    cLast := close
+    mLast := mstr
 
 lagBase(s) =>
     s >= 97.5 ? 0.90 :
@@ -41,7 +69,7 @@ lagBase(s) =>
 // The outer daily request runs on MSTR sessions. Offset the complete average
 // by one daily bar so today's changing price never enters its own baseline.
 // BTC and STRC daily feeds and the supplied BPS inputs define this chart's line.
-premiumN = input.int(10, "Premium sessions", minval=1)
+premiumN = input.int(10, "Premium sessions", minval=1, tooltip="Site data/mstr-config.json premium.n.")
 priorPremium() =>
     db = request.security(btcSym, "D", close)
     ds = request.security(strcSym, "D", close)
@@ -59,14 +87,10 @@ gap    = (mstr / lineM - 1 - premiumAvg) * 100                             // MS
 isMstr   = syminfo.ticker == "MSTR"
 projHere = isMstr ? projM : chartPrev * (1 + 2.0 * (projM / mstrPrev - 1))   // projected price in this chart's units
 
-// lag: the MSTR-over-BTC ratio against its own average over the trailing window, measured in minutes on any timeframe.
-// In the first hour of the session the average runs over the bars since the open, like the backtest did.
-winBars = math.max(2, math.round(winMins * 60 / timeframe.in_seconds()))
-minBars = math.max(1, math.round(minMins * 60 / timeframe.in_seconds()))
-// Keep this indicator's original independent lag calibration.
-lagSlope  = input.float(0.025, "Legacy lag slope per $2,500 of BTC", step=0.0025)
+// lag: MSTR's bar low against the MSTR-over-BTC ratio's own average over the trailing window, measured in minutes on any timeframe.
+// In the first hour of the session the average runs over the bars since the open, like the monitor.
 tgtLag = lagBase(strc) + lagSlope * (btc - 75000) / 2500
-ratio   = mstr / (btc * tgtLag)
+ratio  = mstr / (btc * tgtLag)
 var float sumR = 0.0
 var int   cntR = 0
 if session.isfirstbar_regular
@@ -77,15 +101,19 @@ sumR := sumR + ratio
 cntR := cntR + 1
 smaR    = ta.sma(ratio[1], winBars)                            // computed every bar so its history is consistent
 ratioAv = cntR - 1 >= winBars ? smaR : avSince
-lag     = na(ratioAv) ? na : (ratio / ratioAv - 1) * 100
-btcBack = math.min(winBars, math.max(1, cntR - 1))
-btcMove = (btc / btc[btcBack] - 1) * 100
+ratioLo = mstrLo / (btc * tgtLag)
+lag     = na(ratioAv) ? na : (ratioLo / ratioAv - 1) * 100
+btcMove = (btc / btcAgo - 1) * 100
 armed   = cntR - 1 >= minBars and session.ismarket
 
 lagFire   = armed and not na(lag) and lag <= lagT and btcMove >= btcHold
 cheapFire = gap <= cheapT and session.ismarket
 richFire  = gap >= richT and session.ismarket
-buyBar    = lagFire and not lagFire[1]
+var int lastLagT = na
+lagNew    = lagFire and (na(lastLagT) or time - lastLagT >= coolMins * 60000)
+if lagNew
+    lastLagT := time
+buyBar    = lagNew and (not useGate or btcUp)
 
 plot(close, "Price", color=color.new(color.orange, 0), linewidth=2)                                   // solid orange: this chart's price
 plot(projHere, "Projected price", color=color.new(color.aqua, 0), style=plot.style_circles, linewidth=2)  // dotted aqua: the projection
@@ -93,9 +121,9 @@ plot(lag, "Lag (%)", color=color.new(color.aqua, 0), display=display.none)   // 
 bgcolor(cheapFire ? color.new(color.green, 92) : richFire ? color.new(color.red, 94) : na)
 plotshape(buyBar, "Buy", shape.labelup, location.belowbar, color=color.new(color.aqua, 0), text="BUY", textcolor=color.black, size=size.small)
 
-alertcondition(lagFire, "Lag", "MSTR lag {{plot_2}}% vs its window, BTC holding. Window: the next hour.")
-alertcondition(cheapFire, "Cheap", "Price is under the cheap line. Swing signal.")
-alertcondition(richFire, "Rich", "Price is over the rich line.")
+alertcondition(buyBar, "Lag", "MSTR lag {{plot_2}}% vs its window, BTC holding. Window: the next hour.")
+alertcondition(cheapFire and (not useGate or btcUp), "Cheap", "Price is under the cheap line. Swing signal.")
+alertcondition(richFire and (not useGateSell or not btcUp), "Rich", "Price is over the rich line.")
 
 var table t = table.new(position.top_right, 2, 5, border_width=1, bgcolor=color.new(color.black, 0), frame_color=color.gray, border_color=color.new(color.gray, 60))
 if barstate.islast
