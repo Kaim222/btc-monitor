@@ -117,7 +117,7 @@ def sync_pine(held, shares_m):
     """Rewrite the indicators' default inputs from the live holdings and config, so a re-paste carries the real numbers.
 
     Price coefficients and gap thresholds follow the fitted config. The lag keeps its own slope (lag_slope), and its line
-    and BTC floor follow the config too, so all three indicators carry what this monitor alerts on.
+    and BTC floor follow the config too, as do the two gate switches, so all three indicators carry what this monitor alerts on.
     """
     import re
     subs = [(r'input\.float\([0-9.]+, "BTC held"', 'input.float(%d, "BTC held"' % int(round(held))),
@@ -134,6 +134,8 @@ def sync_pine(held, shares_m):
     for label, value in [("Cheap line (% under projection)", CHEAP * 100), ("Rich line (% over projection)", RICH * 100)]:
         subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%g, "%s"' % (value, label)))
     subs.append((r'input\.int\([0-9]+, "Premium sessions"', 'input.int(%d, "Premium sessions"' % PREMIUM_N))
+    subs.append((r'input\.bool\((?:true|false), "Trend gate', 'input.bool(%s, "Trend gate' % str(GATE).lower()))
+    subs.append((r'input\.bool\((?:true|false), "Gate the sell too', 'input.bool(%s, "Gate the sell too' % str(RICH_GATE).lower()))
     changed = False
     for pf in PINE_FILES:
         if not os.path.exists(pf): continue

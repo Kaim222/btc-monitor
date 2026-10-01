@@ -296,37 +296,50 @@ def test_old_remote_config_uses_local_fit(monkeypatch):
 
 
 def test_pine_sync_fits_prices_preserves_lag_and_newlines(tmp_path, monkeypatch):
-    config = json.loads((ROOT / "mstr_config.json").read_text())
-    monitor.configure(config)
+    repo_config = json.loads((ROOT / "mstr_config.json").read_text())
+    # lag and gate settings deliberately unlike the Pine defaults, so a missing regex leaves the old value and fails
+    config = {**repo_config, "lag_threshold": -0.02, "btc_hour_move_floor": -0.005, "lag_slope": 0.015,
+              "regime_gate": False, "rich_gate": True}
     paths = []
     for name in monitor.PINE_FILES:
         original = (ROOT / name).read_bytes()
+        for already in (b'input.bool(false, "Trend gate', b'input.bool(true, "Gate the sell too',
+                        b'input.float(0.015, "Lag slope', b'input.float(-0.5, "BTC must have held',
+                        b'input.float(-2, "Lag alert', b'input.float(-4, "Lag alert'):
+            assert already not in original   # the sync must be what puts these values there
         path = tmp_path / name
         path.write_bytes(original)
         paths.append(str(path))
     monkeypatch.setattr(monitor, "PINE_FILES", paths)
-    assert monitor.sync_pine(900000, 500)
-    for path in paths:
-        raw = Path(path).read_bytes()
-        assert raw.count(b"\n") == raw.count(b"\r\n")
-        text = raw.decode()
-        assert 'input.float(%s, "Fitted intercept"' % repr(config["fit"]["a"]) in text
-        assert 'input.float(%s, "Target mNAV slope' % repr(config["fit"]["b"]) in text
-        assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
-        # every indicator runs the monitor's lag: its own slope, its line and the BTC floor, all from the config
-        assert 'input.float(%g, "Lag slope per $2,500 of BTC (the lag runs on its own)"' % config["lag_slope"] in text
-        assert "Legacy" not in text
-        assert 'input.float(%g, "BTC must have held' % (100*config["btc_hour_move_floor"]) in text
-        if Path(path).name == "mstx_projected.pine":
-            assert 'input.float(%g, "Lag alert, MSTX' % (200*config["lag_threshold"]) in text
-            assert 'input.float(%g, "Cheap line, MSTX' % (200*config['cheap_threshold']) in text
-            assert 'input.float(%g, "Rich line, MSTX' % (200*config['rich_threshold']) in text
-        else:
-            assert 'input.float(%g, "Lag alert (%%' % (100*config["lag_threshold"]) in text
-            assert 'input.float(%g, "Cheap line' % (100*config['cheap_threshold']) in text
-            assert 'input.float(%g, "Rich line' % (100*config['rich_threshold']) in text
-        assert 'lagBase(strc) + lagSlope * (btc - 75000) / 2500' in text
-    assert not monitor.sync_pine(900000, 500)
+    monitor.configure(config)
+    try:
+        assert monitor.sync_pine(900000, 500)
+        for path in paths:
+            raw = Path(path).read_bytes()
+            assert raw.count(b"\n") == raw.count(b"\r\n")
+            text = raw.decode()
+            assert 'input.float(%s, "Fitted intercept"' % repr(config["fit"]["a"]) in text
+            assert 'input.float(%s, "Target mNAV slope' % repr(config["fit"]["b"]) in text
+            assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
+            # every indicator runs the monitor's lag: its own slope, its line and the BTC floor, all from the config
+            assert 'input.float(0.015, "Lag slope per $2,500 of BTC (the lag runs on its own)"' in text
+            assert 'input.float(-0.5, "BTC must have held (% over the window, floor)"' in text
+            # and the two gate switches the monitor reads
+            assert 'input.bool(false, "Trend gate' in text
+            assert 'input.bool(true, "Gate the sell too' in text
+            assert "Legacy" not in text
+            if Path(path).name == "mstx_projected.pine":
+                assert 'input.float(-4, "Lag alert, MSTX % vs the trailing window"' in text
+                assert 'input.float(%g, "Cheap line, MSTX' % (200*config['cheap_threshold']) in text
+                assert 'input.float(%g, "Rich line, MSTX' % (200*config['rich_threshold']) in text
+            else:
+                assert 'input.float(-2, "Lag alert (% vs the trailing window)"' in text
+                assert 'input.float(%g, "Cheap line' % (100*config['cheap_threshold']) in text
+                assert 'input.float(%g, "Rich line' % (100*config['rich_threshold']) in text
+            assert 'lagBase(strc) + lagSlope * (btc - 75000) / 2500' in text
+        assert not monitor.sync_pine(900000, 500)
+    finally:
+        monitor.configure(repo_config)
 
 
 @pytest.fixture
