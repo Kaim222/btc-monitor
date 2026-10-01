@@ -35,7 +35,23 @@ jobs:
         # Bump yfinance deliberately after testing; pandas 3 is supported.
         run: pip install -q yfinance==1.7.0 pandas
 
+      # One writer: while a session loop run (mstr_loop.yml) is in progress it does these checks every ~75 seconds,
+      # so this run stands down. Fails open: if the API cannot be read, this run checks as before.
+      - name: Skip while the session loop runs
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          busy=no
+          if [ "${{ inputs.test }}" != "true" ] && runs=$(gh run list --workflow mstr_loop.yml --status in_progress --limit 50 --json databaseId,status); then
+            busy=$(echo "$runs" | python mstr_gap.py --loop-running)
+          fi
+          echo "session loop in progress: $busy"
+          echo "skip=$busy" >> "$GITHUB_OUTPUT"
+
       - name: Run MSTR gap monitor
+        if: steps.gate.outputs.skip != 'yes'
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
@@ -46,7 +62,7 @@ jobs:
       # The ledger is append-only, so it is unioned with main rather than overwritten.
       # A lost race retries; if it still cannot push, the job still succeeds, because the alert has already been sent.
       - name: Commit updated state
-        if: always()
+        if: always() && steps.gate.outputs.skip != 'yes'
         run: |
           set -u
           git config user.name  "btc-monitor"

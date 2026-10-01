@@ -1,0 +1,67 @@
+name: MSTR Session Loop
+
+# One long run per session that checks every ~75 seconds (python mstr_gap.py --loop), because GitHub starts the */5 cron
+# 10 to 30 minutes late. These triggers are only starters: each exits at once when an older loop run is in progress, so a
+# loop that dies or reaches its time budget is replaced within one starter interval. No concurrency group: a pending slot
+# there can cancel the successor. While a loop runs, mstr_gap.yml skips itself, so state has one writer.
+on:
+  schedule:
+    - cron: '*/20 13-20 * * 1-5'   # every 20 minutes, 13:00-20:59 UTC weekdays: covers 9:35-16:00 New York in summer and winter
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'test outside market hours on the last session bars (--force)'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'no Pushover keys and no state commits (testing)'
+        type: boolean
+        default: false
+      max_iterations:
+        description: 'stop after this many checks (0 = run to 16:00 New York)'
+        type: string
+        default: '0'
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350           # GitHub's job limit is 360; the loop itself stops after LOOP_BUDGET_MIN (330)
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install -q yfinance==1.7.0 pandas
+
+      - name: Exit if an older loop is running
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Fail closed: if the API cannot be read, do not start a second writer; the 5 minute run stays the fallback.
+          if runs=$(gh run list --workflow mstr_loop.yml --status in_progress --limit 50 --json databaseId,status); then
+            busy=$(echo "$runs" | python mstr_gap.py --loop-running ${{ github.run_id }})
+          else
+            busy=yes; echo "run list failed; not starting a loop"
+          fi
+          echo "older loop in progress: $busy"
+          echo "skip=$busy" >> "$GITHUB_OUTPUT"
+
+      - name: Session loop
+        if: steps.gate.outputs.skip != 'yes'
+        env:
+          PUSHOVER_TOKEN: ${{ !inputs.dry_run && secrets.PUSHOVER_TOKEN || '' }}
+          PUSHOVER_USER:  ${{ !inputs.dry_run && secrets.PUSHOVER_USER || '' }}
+          LOOP_NO_COMMIT: ${{ inputs.dry_run && '1' || '' }}
+          LOOP_MAX_ITER:  ${{ inputs.max_iterations || '0' }}
+        run: python -u mstr_gap.py --loop ${{ inputs.force && '--force' || '' }}

@@ -440,3 +440,77 @@ def test_premium_survives_a_saved_state_reload(scenario,monkeypatch,premium_valu
     assert restored['premium_last']==premium_value
     assert restored['proj_mstx']==saved['proj_mstx']
     assert monitor.PREMIUM_AVG==-.04
+
+
+def test_loop_running_gate():
+    runs = [{"databaseId": 100, "status": "in_progress"}, {"databaseId": 105, "status": "in_progress"}, {"databaseId": 90, "status": "completed"}]
+    assert monitor.loop_running(runs) is True                     # the 5 minute run stands down for any live loop
+    assert monitor.loop_running(runs, 105) is True                # the newer starter exits, the older one keeps the loop
+    assert monitor.loop_running(runs, 100) is False               # the oldest in-progress run is the loop
+    assert monitor.loop_running([{"databaseId": 90, "status": "completed"}]) is False
+    assert monitor.loop_running("not a list") is False and monitor.loop_running([]) is False
+
+
+def test_in_session_bounds():
+    ny = monitor.NY
+    assert not monitor.in_session(pd.Timestamp("2026-10-01 09:34", tz=ny).to_pydatetime())
+    assert monitor.in_session(pd.Timestamp("2026-10-01 09:35", tz=ny).to_pydatetime())
+    assert monitor.in_session(pd.Timestamp("2026-10-01 16:00:59", tz=ny).to_pydatetime())
+    assert not monitor.in_session(pd.Timestamp("2026-10-01 16:01", tz=ny).to_pydatetime())
+    assert not monitor.in_session(pd.Timestamp("2026-10-03 12:00", tz=ny).to_pydatetime())   # Saturday
+
+
+class FakeClock:
+    """Wall clock and monotonic clock that only move when the loop sleeps or a check takes time."""
+    def __init__(self, start):
+        self.t = 0.0; self.start = pd.Timestamp(start, tz=monitor.NY).to_pydatetime()
+    def mono(self): return self.t
+    def now(self): return self.start + pd.Timedelta(seconds=self.t).to_pytimedelta()
+    def sleep(self, s): self.t += s
+
+
+def test_session_loop_cadence_commits_and_stops_at_close(scenario, monkeypatch):
+    monkeypatch.setattr(monitor, "FORCE", False)
+    clock, checks, commits = FakeClock("2026-10-01 15:50"), [], []
+    def check():
+        checks.append(clock.now()); clock.t += 20                 # a check takes 20 s
+        if len(checks) == 3: monitor.PUSHES[0] += 1               # an alert on the third check
+        return 0
+    rc = monitor.session_loop(run_once=check, commit=lambda: commits.append(clock.now()), now_fn=clock.now,
+                              clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330)
+    assert rc == 0
+    gaps = [(b - a).total_seconds() for a, b in zip(checks, checks[1:])]
+    assert gaps and max(gaps) <= 120 and min(gaps) >= monitor.LOOP_PERIOD_S
+    assert checks[-1].strftime("%H:%M") <= "16:00" and len(checks) >= 8
+    assert commits[0] <= checks[0] + pd.Timedelta(seconds=30).to_pytimedelta()          # the first check is committed at once
+    assert any(checks[2] < c <= checks[2] + pd.Timedelta(seconds=30).to_pytimedelta() for c in commits)   # and the alert at once
+    cgaps = [(b - a).total_seconds() for a, b in zip(commits, commits[1:])]
+    assert max(cgaps) <= 180                                                             # state reaches main at least every 3 minutes
+    assert commits[-1] >= checks[-1]                                                     # the last check is committed on the way out
+
+
+def test_session_loop_budget_and_off_hours(scenario, monkeypatch):
+    monkeypatch.setattr(monitor, "FORCE", False)
+    clock = FakeClock("2026-10-01 10:00"); n = []
+    monitor.session_loop(run_once=lambda: n.append(1) or 0, commit=lambda: None, now_fn=clock.now,
+                         clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=10)
+    assert 7 <= len(n) <= 9 and clock.t <= 11 * 60                                       # stops at the budget, well before 6 hours
+    clock = FakeClock("2026-10-01 17:00"); n = []
+    monitor.session_loop(run_once=lambda: n.append(1) or 0, commit=lambda: n.append("c"), now_fn=clock.now,
+                         clock=clock.mono, sleep=clock.sleep, max_iter=0, budget_min=330)
+    assert n == []                                                                       # after the close it does nothing at all
+    clock = FakeClock("2026-10-01 09:10"); n = []
+    monitor.session_loop(run_once=lambda: n.append(clock.now()) or 0, commit=lambda: None, now_fn=clock.now,
+                         clock=clock.mono, sleep=clock.sleep, max_iter=2, budget_min=330)
+    assert n[0].strftime("%H:%M") == "09:35"                                             # a starter just before the open waits for it
+
+
+def test_session_loop_survives_a_crashing_check(scenario, monkeypatch):
+    monkeypatch.setattr(monitor, "FORCE", True)
+    clock, n = FakeClock("2026-10-01 18:00"), []
+    def check():
+        n.append(1)
+        if len(n) == 1: raise RuntimeError("boom")
+        return 0
+    rc = monitor.session_loop(run_once=check, commit=lambda: None, now_fn=clock.now, clock=clock.mono, sleep=clock.sleep, max_iter=3, budget_min=330)
+    assert len(n) == 3 and rc == 0

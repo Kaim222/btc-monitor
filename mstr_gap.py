@@ -36,7 +36,7 @@ runs (MSTR minus BTC, and MSTX itself, over the next 30 and 60 minutes) into mst
 Regular session only (9:35 to 16:00 New York). Env: PUSHOVER_TOKEN, PUSHOVER_USER; without them it prints instead of
 sending. Flags: --force (run outside market hours on the last session's bars), --test (send one test message).
 """
-import os, sys, json, math, time, traceback, urllib.request, urllib.parse
+import os, sys, json, math, time, subprocess, traceback, urllib.request, urllib.parse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import pandas as pd, yfinance as yf
@@ -223,12 +223,14 @@ BAND_PLAY = {"MSTX": "MSTX PMCC: long 12 months at 0.75 delta, short 90 days at 
              "IBIT": "IBIT PMCC: long 12 months at 0.75 delta, short 90 days at the %d line, rolled. Rich readings here are the sell." % LADDER_LINES[2],
              "sell zone": "Sell the BTC beta into it and rotate down; the proceeds sit in STRC."}
 
+PUSHES = [0]          # pushes delivered (or printed dry) by this process; the session loop commits right after one
 def send_pushover(title, message, sound="cashregister", priority=0):
     for attempt in range(3):
         try:
             token, user = os.environ.get("PUSHOVER_TOKEN"), os.environ.get("PUSHOVER_USER")
             if not token or not user:
                 print("[dry run, no Pushover keys]\n" + title + "\n" + message.replace("<b>", "").replace("</b>", ""))
+                PUSHES[0] += 1
                 return True
             data = urllib.parse.urlencode({"token": token, "user": user, "title": title, "message": message,
                                            "html": "1", "sound": sound, "priority": priority}).encode()
@@ -238,6 +240,7 @@ def send_pushover(title, message, sound="cashregister", priority=0):
             if result.get("status") != 1:
                 raise RuntimeError("Pushover error: %s" % result)
             print("Pushover sent: " + title)
+            PUSHES[0] += 1
             return True
         except Exception:
             traceback.print_exc()
@@ -251,6 +254,10 @@ def bars(ticker, interval="1m", period="2d", field="Close"):   # BTC "1d" is the
     if h.empty: raise RuntimeError("no %s bars for %s" % (interval, ticker))
     h.index = h.index.tz_convert(NY)
     return h[field] if isinstance(field, str) else h[list(field)]
+
+def in_session(now):
+    """The regular session this monitor keeps to: weekdays 9:35 to 16:00 New York, both minutes included."""
+    return now.weekday() < 5 and (9, 35) <= (now.hour, now.minute) <= (16, 0)
 
 def score_ledger(df, ledger):
     """Fill in the 30 and 60 minute outcomes (MSTR minus BTC, in percent) for alerts that now have the bars to score them."""
@@ -357,8 +364,7 @@ def main():
                 state["regime"] = regime_now
         except Exception as exc:
             failed('50-day crossing', exc)
-        in_session = now.weekday() < 5 and (now.hour, now.minute) >= (9, 35) and (now.hour, now.minute) <= (16, 0)
-        if not in_session and not FORCE:
+        if not in_session(now) and not FORCE:
             state["last_regime_check"] = now.isoformat()
             print("outside the regular session (%s NY); BTC %s its 50-day; nothing else to do" % (now.strftime("%a %H:%M"), regime_now)); return
         mstr_f = bars("MSTR", field=("Close", "Low"))          # the Low feeds the lag, so the monitor measures where the indicator measures
@@ -551,5 +557,77 @@ def main():
                 traceback.print_exc()
     return 1 if errors else 0
 
+
+# ---- Session loop -------------------------------------------------------------------------------------------------------
+# GitHub starts scheduled runs late or drops them (10/1: 17:56, 18:27, 18:35 ... UTC on a */5 cron), so the site went STALE
+# for 20 to 30 minutes at a time. In the session one long run (mstr_loop.yml) calls main() every LOOP_PERIOD_S seconds instead.
+# main() reloads state and ledger from disk each call, so cooldowns and alert text are exactly the scheduled run's.
+LOOP_PERIOD_S, LOOP_COMMIT_S, LOOP_BUDGET_MIN, LOOP_OPEN_WAIT_MIN = 75, 150, 330, 40
+COMMIT_SCRIPT = os.path.join(".github", "workflows", "commit_state.sh")
+
+def loop_running(runs, my_id=None):
+    """True when a session loop run (gh run list --json databaseId,status on mstr_loop.yml) is in progress.
+
+    With my_id (a starter checking its peers) only an OLDER run counts, so of two starters that overlap the older one keeps
+    the loop and the newer exits; without it (the 5 minute run) any loop in progress means stand down, one writer at a time."""
+    for r in runs if isinstance(runs, list) else []:
+        if not isinstance(r, dict) or r.get("status") != "in_progress": continue
+        try: rid = int(r.get("databaseId"))
+        except (TypeError, ValueError): continue
+        if my_id is None or rid < int(my_id): return True
+    return False
+
+def _ledger_rows():
+    try: return len(load(LEDGER_FILE, []))
+    except Exception: return -1
+
+def commit_state(script):
+    """Commit state, ledger and pine files with the scheduled run's own fetch, reset, ledger-merge and retry logic."""
+    if os.environ.get("LOOP_NO_COMMIT"): print("commit skipped (LOOP_NO_COMMIT)"); return False
+    r = subprocess.run(["bash", "-c", script])
+    return r.returncode == 0
+
+def session_loop(run_once=None, commit=None, now_fn=None, clock=time.monotonic, sleep=time.sleep, max_iter=None, budget_min=None):
+    """Check every LOOP_PERIOD_S seconds until 16:00 New York or the time budget, whichever is first.
+
+    Commits on the first check, then at least every LOOP_COMMIT_S seconds, and at once after any push or new ledger row so a
+    cooldown is on main before anything else can read it. Returns the last check's exit code."""
+    run_once = run_once or main
+    now_fn = now_fn or (lambda: datetime.now(NY))
+    if commit is None:
+        script = open(COMMIT_SCRIPT).read()            # read once: the commit step resets the checkout to origin/main
+        commit = lambda: commit_state(script)
+    max_iter = int(os.environ.get("LOOP_MAX_ITER") or 0) if max_iter is None else max_iter
+    budget = 60 * float(os.environ.get("LOOP_BUDGET_MIN") or LOOP_BUDGET_MIN) if budget_min is None else 60 * budget_min
+    now = now_fn()
+    if not in_session(now) and not FORCE and now.weekday() < 5:
+        opens = now.replace(hour=9, minute=35, second=0, microsecond=0)
+        if timedelta(0) < opens - now <= timedelta(minutes=LOOP_OPEN_WAIT_MIN):
+            print("waiting %d s for the 9:35 open" % (opens - now).total_seconds()); sleep((opens - now).total_seconds())
+    start, last_commit, n, rc, dirty = clock(), None, 0, 0, False
+    while True:
+        now = now_fn()
+        if not FORCE and not in_session(now): print("loop: session over (%s NY)" % now.strftime("%a %H:%M:%S")); break
+        if clock() - start >= budget: print("loop: time budget of %d minutes reached" % (budget // 60)); break
+        if max_iter and n >= max_iter: print("loop: %d iterations done" % n); break
+        t0, pushes, rows = clock(), PUSHES[0], _ledger_rows()
+        n += 1
+        print("loop: check %d at %s NY" % (n, now.strftime("%H:%M:%S")), flush=True)
+        try: rc = run_once()
+        except Exception: traceback.print_exc(); rc = 1
+        dirty = True
+        alert = PUSHES[0] != pushes or _ledger_rows() != rows
+        if alert or last_commit is None or clock() - last_commit >= LOOP_COMMIT_S:
+            print("loop: committing (%s)" % ("alert or new ledger row" if alert else "first check" if last_commit is None else "interval"), flush=True)
+            commit(); last_commit, dirty = clock(), False
+        sleep(max(5.0, LOOP_PERIOD_S - (clock() - t0)))
+    if dirty: commit()
+    return rc
+
 if __name__ == "__main__":
-    sys.exit(main())
+    if "--loop-running" in sys.argv:          # stdin: gh run list --json databaseId,status; optional arg: this run's id
+        i = sys.argv.index("--loop-running"); mine = sys.argv[i + 1] if len(sys.argv) > i + 1 else None
+        try: runs = json.load(sys.stdin)
+        except Exception: runs = []
+        print("yes" if loop_running(runs, mine) else "no"); sys.exit(0)
+    sys.exit(session_loop() if "--loop" in sys.argv else main())
