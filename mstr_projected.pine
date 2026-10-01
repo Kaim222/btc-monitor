@@ -69,13 +69,10 @@ lagBase(s) =>
 // The outer daily request runs on MSTR sessions. Offset the complete average
 // by one daily bar so today's changing price never enters its own baseline.
 // BTC and STRC daily feeds and the supplied BPS inputs define this chart's line.
-// Lookahead on pairs each session with BTC's close of the same UTC day (8 PM New York). With it off, BTC's daily bar
-// closes after MSTR's, so every session read the previous day's BTC: 9/21 took Sunday's 81,160 instead of Monday's
-// 86,595, and on 10/1 the 10-session average read -1.1% against the site's -3.1%. The [1] below keeps today out.
 premiumN = input.int(10, "Premium sessions", minval=1, tooltip="Site data/mstr-config.json premium.n.")
 priorPremium() =>
-    db = request.security(btcSym, "D", close, lookahead=barmerge.lookahead_on)
-    ds = request.security(strcSym, "D", close, lookahead=barmerge.lookahead_on)
+    db = request.security(btcSym, "D", close)
+    ds = request.security(strcSym, "D", close)
     dt = math.min(2.0, fitA + fitC * math.max(0, fitPar - ds) + slope * (db - 75000) / 2500)
     dp = close / (db * (btcHeld / (sharesM * 1e6)) * dt) - 1
     ta.sma(dp, premiumN)[1]
