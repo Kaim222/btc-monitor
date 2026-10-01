@@ -68,15 +68,20 @@ jobs:
           git config user.name  "btc-monitor"
           git config user.email "monitor@noreply"
           FILES="mstr_state.json mstr_ledger.json mstr_gap_lag.pine mstr_projected.pine mstx_projected.pine"
-          mkdir -p /tmp/keep
-          for f in $FILES; do [ -f "$f" ] && cp "$f" "/tmp/keep/$f"; done
+          KEEP=$(mktemp -d)
+          # State and ledger always; a pine file only when this run changed it (sync_pine). Copying an untouched pine file over main
+          # reverted a pine push that landed while a run was going (10/1, the loop's first commit after 4ee47b21).
+          for f in $FILES; do
+            case "$f" in *.pine) git diff --quiet HEAD -- "$f" && continue;; esac
+            [ -f "$f" ] && cp "$f" "$KEEP/$f"
+          done
           for i in 1 2 3; do
             git fetch -q origin main
             git reset -q --hard origin/main
-            for f in $FILES; do [ -f "/tmp/keep/$f" ] && cp "/tmp/keep/$f" "$f"; done
-            if [ -f "/tmp/keep/mstr_ledger.json" ]; then
+            for f in $FILES; do [ -f "$KEEP/$f" ] && cp "$KEEP/$f" "$f"; done
+            if [ -f "$KEEP/mstr_ledger.json" ]; then
               git show origin/main:mstr_ledger.json > /tmp/remote_ledger.json 2>/dev/null || echo "[]" > /tmp/remote_ledger.json
-              python merge_ledger.py /tmp/remote_ledger.json /tmp/keep/mstr_ledger.json mstr_ledger.json
+              python merge_ledger.py /tmp/remote_ledger.json $KEEP/mstr_ledger.json mstr_ledger.json
             fi
             for f in $FILES; do [ -f "$f" ] && git add "$f"; done
             if git diff --staged --quiet; then echo "nothing to commit"; exit 0; fi
