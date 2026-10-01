@@ -562,7 +562,7 @@ def main():
 # GitHub starts scheduled runs late or drops them (10/1: 17:56, 18:27, 18:35 ... UTC on a */5 cron), so the site went STALE
 # for 20 to 30 minutes at a time. In the session one long run (mstr_loop.yml) calls main() every LOOP_PERIOD_S seconds instead.
 # main() reloads state and ledger from disk each call, so cooldowns and alert text are exactly the scheduled run's.
-LOOP_PERIOD_S, LOOP_COMMIT_S, LOOP_BUDGET_MIN, LOOP_OPEN_WAIT_MIN = 75, 150, 330, 40
+LOOP_PERIOD_S, LOOP_COMMIT_S, LOOP_BUDGET_MIN, LOOP_OPEN_WAIT_MIN = 75, 140, 330, 40   # commit every 2nd check: 150 s, under 3 minutes even when a check is fast
 COMMIT_SCRIPT = os.path.join(".github", "workflows", "commit_state.sh")
 
 def loop_running(runs, my_id=None):

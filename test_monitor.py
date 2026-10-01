@@ -472,11 +472,12 @@ class FakeClock:
     def sleep(self, s): self.t += s
 
 
-def test_session_loop_cadence_commits_and_stops_at_close(scenario, monkeypatch):
+@pytest.mark.parametrize("check_s", [1, 20, 60])
+def test_session_loop_cadence_commits_and_stops_at_close(scenario, monkeypatch, check_s):
     monkeypatch.setattr(monitor, "FORCE", False)
     clock, checks, commits = FakeClock("2026-10-01 15:50"), [], []
     def check():
-        checks.append(clock.now()); clock.t += 20                 # a check takes 20 s
+        checks.append(clock.now()); clock.t += check_s            # a fast check exposed a 225 s commit gap live on 10/1
         if len(checks) == 3: monitor.PUSHES[0] += 1               # an alert on the third check
         return 0
     rc = monitor.session_loop(run_once=check, commit=lambda: commits.append(clock.now()), now_fn=clock.now,
@@ -485,8 +486,8 @@ def test_session_loop_cadence_commits_and_stops_at_close(scenario, monkeypatch):
     gaps = [(b - a).total_seconds() for a, b in zip(checks, checks[1:])]
     assert gaps and max(gaps) <= 120 and min(gaps) >= monitor.LOOP_PERIOD_S
     assert checks[-1].strftime("%H:%M") <= "16:00" and len(checks) >= 8
-    assert commits[0] <= checks[0] + pd.Timedelta(seconds=30).to_pytimedelta()          # the first check is committed at once
-    assert any(checks[2] < c <= checks[2] + pd.Timedelta(seconds=30).to_pytimedelta() for c in commits)   # and the alert at once
+    assert commits[0] <= checks[0] + pd.Timedelta(seconds=check_s + 10).to_pytimedelta()          # the first check is committed at once
+    assert any(checks[2] < c <= checks[2] + pd.Timedelta(seconds=check_s + 10).to_pytimedelta() for c in commits)   # and the alert at once
     cgaps = [(b - a).total_seconds() for a, b in zip(commits, commits[1:])]
     assert max(cgaps) <= 180                                                             # state reaches main at least every 3 minutes
     assert commits[-1] >= checks[-1]                                                     # the last check is committed on the way out
