@@ -250,8 +250,12 @@ def send_pushover(title, message, sound="cashregister", priority=0):
 
 
 def bars(ticker, interval="1m", period="2d", field="Close"):   # BTC "1d" is the UTC day and goes empty after 8 PM New York, so two days
-    h = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
+    for attempt in range(3):   # 10/2 10:51: one Yahoo reply came back without timestamps ('Index' object has no attribute 'tz') and paged Alex
+        h = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
+        if not h.empty and isinstance(h.index, pd.DatetimeIndex): break
+        time.sleep(3)
     if h.empty: raise RuntimeError("no %s bars for %s" % (interval, ticker))
+    if not isinstance(h.index, pd.DatetimeIndex): raise RuntimeError("%s bars for %s came back without timestamps" % (interval, ticker))
     h.index = h.index.tz_convert(NY)
     return h[field] if isinstance(field, str) else h[list(field)]
 
