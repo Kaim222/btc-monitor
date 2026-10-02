@@ -453,7 +453,7 @@ def main():
         # polls, so nothing was ever sent. Scan every bar since the previous run and judge the deepest one.
         try:
             lb = state.get("last_bar")
-            scan = df[df.index > datetime.fromisoformat(lb)] if lb else df.iloc[0:0]
+            scan = df[df.index >= datetime.fromisoformat(lb)] if lb else df.iloc[0:0]   # >=: the newest bar is often judged while still forming (10/2: 23 of 27 runs), so judge it again finished; the cooldown stops a repeat
             if len(scan) > 30: scan = df.tail(90)
             elif len(scan) < 2: scan = df.tail(6)                 # first run of the day or no new bars
             scan = scan[scan["lag"].notna()].copy()
