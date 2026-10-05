@@ -9,8 +9,8 @@
 // Typed inputs are the values Pine cannot derive. The monitor rewrites their defaults from the live sources on every run.
 indicator("MSTR gap + lag (Kaim)", shorttitle="MSTR gap", overlay=false, format=format.percent, precision=2)
 
-btcHeld   = input.float(847666, "BTC held", step=1, tooltip="api.strategy.com bitcoinKpis btcHoldings, read by the monitor every run. Swing lines only; the lag does not use it.")
-sharesM   = input.float(451.577, "Assumed diluted shares (M)", step=0.001, tooltip="api.strategy.com bitcoinKpis: BTC held / satsPerShare. Swing lines only; the lag does not use it.")
+btcHeld   = input.float(848000, "BTC held", step=1, tooltip="api.strategy.com bitcoinKpis btcHoldings, read by the monitor every run. Swing lines only; the lag does not use it.")
+sharesM   = input.float(451.670, "Assumed diluted shares (M)", step=0.001, tooltip="api.strategy.com bitcoinKpis: BTC held / satsPerShare. Swing lines only; the lag does not use it.")
 slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001, tooltip="Site data/mstr-config.json fit.b, fitted 2026-09-21.")
 fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001, tooltip="Site data/mstr-config.json fit.a.")
 fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001, tooltip="Site data/mstr-config.json fit.c, per point of STRC under par.")

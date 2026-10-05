@@ -9,8 +9,8 @@
 // Typed inputs are the values Pine cannot derive. The monitor rewrites their defaults from the live sources on every run.
 indicator("MSTR projected price (Kaim)", shorttitle="Projected", overlay=true)
 
-btcHeld   = input.float(847666, "BTC held", step=1, tooltip="api.strategy.com bitcoinKpis btcHoldings, read by the monitor every run (mstr_state.json btc_held).")
-sharesM   = input.float(451.577, "Assumed diluted shares (M)", step=0.001, tooltip="api.strategy.com bitcoinKpis: BTC held / satsPerShare (mstr_state.json shares_m).")
+btcHeld   = input.float(848000, "BTC held", step=1, tooltip="api.strategy.com bitcoinKpis btcHoldings, read by the monitor every run (mstr_state.json btc_held).")
+sharesM   = input.float(451.670, "Assumed diluted shares (M)", step=0.001, tooltip="api.strategy.com bitcoinKpis: BTC held / satsPerShare (mstr_state.json shares_m).")
 slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of BTC", step=0.0001, tooltip="Site data/mstr-config.json fit.b, fitted 2026-09-21.")
 fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001, tooltip="Site data/mstr-config.json fit.a.")
 fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001, tooltip="Site data/mstr-config.json fit.c, per point of STRC under par.")
