@@ -15,6 +15,7 @@ slope     = input.float(0.030355691245129924, "Target mNAV slope per $2,500 of B
 fitA      = input.float(0.9349260602738632, "Fitted intercept", step=0.0001, tooltip="Site data/mstr-config.json fit.a.")
 fitC      = input.float(-0.0029161736798696616, "Fitted STRC shortfall", maxval=0, step=0.0001, tooltip="Site data/mstr-config.json fit.c, per point of STRC under par.")
 fitPar    = input.float(100, "STRC par", step=1, tooltip="Site data/mstr-config.json fit.par.")
+sheetBase = input.bool(false, "Sheet mNAV base from STRC", tooltip="On when the site's data/mstr-config.json fit is the sheet line: the base comes from STRC as in lagBase, plus the slope.")
 lagSlope  = input.float(0.0125, "Lag slope per $2,500 of BTC (the lag runs on its own)", step=0.0025, tooltip="Site data/mstr-config.json lag_slope.")
 lagT      = input.float(-1.5, "Lag alert (% vs the trailing window)", step=0.1, tooltip="Site data/mstr-config.json lag_threshold x 100. MSTR terms; twice this on MSTX.")
 cheapT    = input.float(-4.27186, "Cheap line (% under projection)", step=0.5, tooltip="Site data/mstr-model.json premium.p25 x 100 (excess quartile, refreshed after each close).")
@@ -64,12 +65,12 @@ premiumN = input.int(10, "Premium sessions", minval=1, tooltip="Site data/mstr-c
 priorPremium() =>
     db = request.security(btcSym, "D", close, lookahead=barmerge.lookahead_on)
     ds = request.security(strcSym, "D", close, lookahead=barmerge.lookahead_on)
-    dt = math.min(2.0, fitA + fitC * math.max(0, fitPar - ds) + slope * (db - 75000) / 2500)
+    dt = (sheetBase ? math.min(2.0, lagBase(ds) + slope * (db - 75000) / 2500) : math.min(2.0, fitA + fitC * math.max(0, fitPar - ds) + slope * (db - 75000) / 2500))
     dp = close / (db * (btcHeld / (sharesM * 1e6)) * dt) - 1
     ta.sma(dp, premiumN)[1]
 premiumAvg = request.security(mstrSym, "D", priorPremium(), lookahead=barmerge.lookahead_on)
 
-target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc) + slope * (btc - 75000) / 2500)
+target = (sheetBase ? math.min(2.0, lagBase(strc) + slope * (btc - 75000) / 2500) : math.min(2.0, fitA + fitC * math.max(0, fitPar - strc) + slope * (btc - 75000) / 2500))
 bps    = btcHeld / (sharesM * 1e6)
 lineM  = btc * bps * target
 proj   = lineM * (1 + premiumAvg)

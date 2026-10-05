@@ -129,7 +129,9 @@ def sync_pine(held, shares_m):
             (r'input\.float\(-?[0-9.]+, "BTC must have held \(% over the window, floor\)"', 'input.float(%g, "BTC must have held (%% over the window, floor)"' % (100 * BTC_HOLD)),
             (r'input\.float\(-?[0-9.]+, "Cheap line, MSTX % under projection"', 'input.float(%g, "Cheap line, MSTX %% under projection"' % (100 * CHEAP_X)),
             (r'input\.float\(-?[0-9.]+, "Rich line, MSTX % over projection"', 'input.float(%g, "Rich line, MSTX %% over projection"' % (100 * RICH_X))]
-    for key, label in [("a", "Fitted intercept"), ("c", "Fitted STRC shortfall"), ("par", "STRC par")]:
+    sheet = FIT.get("kind") == "sheet"
+    subs.append((r'input\.bool\((?:true|false), "Sheet mNAV base from STRC"', 'input.bool(%s, "Sheet mNAV base from STRC"' % str(sheet).lower()))
+    for key, label in ([] if sheet else [("a", "Fitted intercept"), ("c", "Fitted STRC shortfall"), ("par", "STRC par")]):
         subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%s, "%s"' % (repr(FIT[key]), label)))
     for label, value in [("Cheap line (% under projection)", CHEAP * 100), ("Rich line (% over projection)", RICH * 100)]:
         subs.append((r'input\.float\(-?[0-9.]+, "' + re.escape(label) + '"', 'input.float(%g, "%s"' % (value, label)))
@@ -156,7 +158,9 @@ def configure(config, held=None, shares=None, source="none", premium=None):
     if cfg.get("shares_m") not in (None, "", "auto"): _s = float(cfg["shares_m"]); HOLD_SRC = "config override"
     BTC_HELD = _h if _h else 845050.0; SHARES_M = _s if _s else 450.112
     FIT = dict(cfg.get("fit", FIT_DEFAULT))
-    if not all(math.isfinite(float(FIT[k])) for k in ("a", "b", "c", "par")) or FIT["c"] > 0:
+    if FIT.get("kind") == "sheet":                     # the site's fit since 10/5: Alex's sheet, mNAV base from STRC (lag_base) plus b per $2,500
+        if not math.isfinite(float(FIT["b"])): raise ValueError("Invalid sheet line")
+    elif not all(math.isfinite(float(FIT[k])) for k in ("a", "b", "c", "par")) or FIT["c"] > 0:
         raise ValueError("Invalid fitted line")
     SLOPE = float(FIT["b"])
     LAG, CHEAP, RICH = float(cfg.get("lag_threshold", -0.015)), float(cfg.get("cheap_threshold", -0.085)), float(cfg.get("rich_threshold", 0.10))
@@ -186,6 +190,8 @@ def target(strc, btc, slope=None):
     # Preserve the independent lag calculation exactly, including its historical base.
     if slope is not None:
         return lag_base(strc) + slope * (btc - 75000) / 2500
+    if FIT.get("kind") == "sheet":
+        return min(2.0, lag_base(strc) + FIT["b"] * (btc - 75000) / 2500)
     return min(2.0, FIT["a"] + FIT["c"] * max(0, FIT["par"] - strc) + FIT["b"] * (btc - 75000) / 2500)
 
 # The ladder: Kaim power law model v2, the same constants as the site (its data/ladder-model.json, fitted 2026-09-19, refit yearly).

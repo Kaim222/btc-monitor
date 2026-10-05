@@ -322,7 +322,8 @@ def test_pine_sync_fits_prices_preserves_lag_and_newlines(tmp_path, monkeypatch)
             text = raw.decode()
             assert 'input.float(%s, "Fitted intercept"' % repr(config["fit"]["a"]) in text
             assert 'input.float(%s, "Target mNAV slope' % repr(config["fit"]["b"]) in text
-            assert 'target = math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
+            assert 'target = (sheetBase ? math.min(2.0, lagBase(strc) + slope * (btc - 75000) / 2500) : math.min(2.0, fitA + fitC * math.max(0, fitPar - strc)' in text
+            assert 'input.bool(false, "Sheet mNAV base from STRC"' in text   # the repo config is a fitted line, so the sheet switch syncs off
             # every indicator runs the monitor's lag: its own slope, its line and the BTC floor, all from the config
             assert 'input.float(0.015, "Lag slope per $2,500 of BTC (the lag runs on its own)"' in text
             assert 'input.float(-0.5, "BTC must have held (% over the window, floor)"' in text
@@ -586,3 +587,20 @@ def test_commit_script_moves_only_the_pine_default_edits_and_fails_loudly():
         git("remote", "set-url", "origin", str(top / "missing.git"), cwd=run)
         r = subprocess.run([bash, "-c", script], cwd=run, capture_output=True, text=True)
         assert r.returncode == 1 and "not pushed after 3 tries" in r.stdout                 # a push that never lands is not reported as success
+
+
+def test_sheet_fit_from_the_site_config():
+    """The site's fit became Alex's sheet on 10/5 (kind 'sheet', no a/c/par); the monitor crashed on fit['a']."""
+    import mstr_gap as monitor
+    try:
+        monitor.configure({"fit": {"kind": "sheet", "b": 0.025}})
+        assert monitor.target(99.58, 75000) == pytest.approx(0.900)
+        assert monitor.target(99.58, 85000) == pytest.approx(1.000)
+        assert monitor.target(99.58, 137500) == pytest.approx(1.525)
+        assert monitor.target(96, 75000) == pytest.approx(0.885)
+        assert monitor.target(90, 75000) == pytest.approx(0.8375)
+        assert monitor.target(75, 75000) == pytest.approx(0.775)
+        assert monitor.target(100, 200000) == 2
+        assert monitor.target(98.7, 100000, monitor.LAG_SLOPE) == pytest.approx(1.025)   # the lag keeps its own slope
+    finally:
+        monitor.configure({})
