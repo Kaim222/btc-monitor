@@ -1,0 +1,75 @@
+{
+  "updated": "2026-10-05T09:23:50.133300+00:00",
+  "btc": 86507.11,
+  "as_of": "2026-10-04",
+  "flags": [
+    {
+      "id": "above50",
+      "label": "BTC 30%+ over 50-day avg",
+      "value": "9.5%",
+      "threshold": "30%",
+      "on": false,
+      "source": "Coinbase"
+    },
+    {
+      "id": "gain30",
+      "label": "BTC up 50%+ in 30 days",
+      "value": "8.6%",
+      "threshold": "50%",
+      "on": false,
+      "source": "Coinbase"
+    },
+    {
+      "id": "above20",
+      "label": "BTC 20%+ over 20-day avg",
+      "value": "4.4%",
+      "threshold": "20%",
+      "on": false,
+      "source": "Coinbase"
+    },
+    {
+      "id": "mayer",
+      "label": "BTC 1.5x its 200-day avg",
+      "value": "1.21x",
+      "threshold": "1.5x",
+      "on": false,
+      "source": "Coinbase"
+    },
+    {
+      "id": "funding",
+      "label": "Funding 15%+/yr, OI beating BTC",
+      "value": "4.2%, OI +2.4%",
+      "threshold": "15%, OI > BTC",
+      "on": false,
+      "source": "OKX / Coinbase"
+    },
+    {
+      "id": "cbprem",
+      "label": "Coinbase discount, BTC rising",
+      "value": "-0.02%, +2.4%",
+      "threshold": "-0.10%, +3%",
+      "on": false,
+      "source": "Coinbase / OKX"
+    },
+    {
+      "id": "sth",
+      "label": "Under short-term holder cost",
+      "value": "unavailable",
+      "threshold": "cost basis",
+      "on": null,
+      "source": "not automated",
+      "note": "not automated"
+    },
+    {
+      "id": "etf",
+      "label": "Spot ETF outflows",
+      "value": "unavailable",
+      "threshold": "net outflows",
+      "on": null,
+      "source": "not automated",
+      "note": "not automated"
+    }
+  ],
+  "on_count": 0,
+  "auto_count": 6
+}

@@ -1,0 +1,54 @@
+name: Bitcoin Warning Signs
+
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: bitcoin-warning-signs
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run warning signs monitor
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER:  ${{ secrets.PUSHOVER_USER }}
+        run: python warning_signs.py
+
+      - name: Commit updated warnings and state
+        # Same fetch/reset/restore/retry pattern as commit_state.sh, with only our two files.
+        run: |
+          set -eu
+          git config user.name "btc-monitor"
+          git config user.email "monitor@noreply"
+          KEEP=$(mktemp -d)
+          cp warnings.json warning_state.json "$KEEP/"
+          for i in 1 2 3; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            cp "$KEEP/warnings.json" "$KEEP/warning_state.json" .
+            git add warnings.json warning_state.json
+            if git diff --staged --quiet; then echo "nothing to commit"; exit 0; fi
+            git commit -q -m "warning state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if git push -q origin HEAD:main; then echo "state pushed on try $i"; exit 0; fi
+            echo "push raced another run, retrying ($i of 3)"
+          done
+          echo "state not pushed after 3 tries"
+          exit 1
