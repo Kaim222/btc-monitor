@@ -255,13 +255,27 @@ def send_pushover(title, message, sound="cashregister", priority=0):
     return False
 
 
+class YahooGlitch(RuntimeError):
+    """A Yahoo reply with no rows or no timestamps. It pages only when two runs in a row hit one (10/5 9:24 AM and 10/6 2:43 PM paged Alex)."""
+
+
+def daily(ticker, period):
+    """Yahoo daily closes with bars()'s guard: a reply with no rows or without timestamps is retried, then raised as a YahooGlitch."""
+    for attempt in range(3):
+        h = yf.Ticker(ticker).history(period=period)
+        if not h.empty and isinstance(h.index, pd.DatetimeIndex): break
+        time.sleep(3)
+    if h.empty or not isinstance(h.index, pd.DatetimeIndex): raise YahooGlitch("daily %s bars for %s came back empty or without timestamps" % (period, ticker))
+    return h["Close"].dropna()
+
+
 def bars(ticker, interval="1m", period="2d", field="Close"):   # BTC "1d" is the UTC day and goes empty after 8 PM New York, so two days
     for attempt in range(3):   # 10/2 10:51: one Yahoo reply came back without timestamps ('Index' object has no attribute 'tz') and paged Alex
         h = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
         if not h.empty and isinstance(h.index, pd.DatetimeIndex): break
         time.sleep(3)
-    if h.empty: raise RuntimeError("no %s bars for %s" % (interval, ticker))
-    if not isinstance(h.index, pd.DatetimeIndex): raise RuntimeError("%s bars for %s came back without timestamps" % (interval, ticker))
+    if h.empty: raise YahooGlitch("no %s bars for %s" % (interval, ticker))
+    if not isinstance(h.index, pd.DatetimeIndex): raise YahooGlitch("%s bars for %s came back without timestamps" % (interval, ticker))
     h.index = h.index.tz_convert(NY)
     return h[field] if isinstance(field, str) else h[list(field)]
 
@@ -293,12 +307,13 @@ def score_ledger(df, ledger):
 def main():
     now = datetime.now(NY)
     state, ledger = {}, []
-    errors, error_messages = [], []
+    errors, error_messages, glitches = [], [], []
 
     def failed(name, exc):
         traceback.print_exc()
         errors.append(name)
         error_messages.append("%s: %s" % (name, exc))
+        glitches.append(isinstance(exc, YahooGlitch))
 
     def push(*args, **kwargs):
         if not send_pushover(*args, **kwargs):
@@ -327,7 +342,7 @@ def main():
             return
         # BTC's daily close vs its 50-day, and the ladder band on the monthly close: checked on every run, in or out of the session, pushed on a change.
         # Completed UTC days only (the rule is the daily close, so the crossing fires once, on the first run after the close, never on a wick).
-        btc_daily = yf.Ticker("BTC-USD").history(period="130d")["Close"].dropna()
+        btc_daily = daily("BTC-USD", "130d")
         utc_now = datetime.now(timezone.utc); tz = btc_daily.index.tz
         done = btc_daily[btc_daily.index < pd.Timestamp(utc_now.year, utc_now.month, utc_now.day, tz=tz)]
         btc50 = float(done.tail(50).mean()); btc_close = float(done.iloc[-1])
@@ -545,7 +560,12 @@ def main():
         failed("upstream", exc)
     finally:
         notify = False
-        if errors:
+        only_glitch = bool(errors) and all(glitches)
+        try:
+            state["glitch_runs"] = runs = (int(state.get("glitch_runs") or 0) + 1) if only_glitch else 0
+        except Exception:
+            runs = 2
+        if errors and not (only_glitch and runs < 2):   # a lone Yahoo glitch waits for the next run before paging
             try:
                 last_push = state.get("last_error_push")
                 notify = (not last_push) or (now - datetime.fromisoformat(last_push)).total_seconds() >= 3600

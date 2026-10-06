@@ -604,3 +604,26 @@ def test_sheet_fit_from_the_site_config():
         assert monitor.target(98.7, 100000, monitor.LAG_SLOPE) == pytest.approx(1.025)   # the lag keeps its own slope
     finally:
         monitor.configure({})
+
+
+def test_yahoo_daily_glitch_waits_one_run_before_paging(scenario, monkeypatch):
+    """10/5 9:24 AM and 10/6 2:43 PM: Yahoo's daily BTC reply came back without timestamps and paged 'Monitor error'."""
+    monkeypatch.setattr(monitor.time, "sleep", lambda s: None)
+    calls = []
+    def ticker(t):
+        calls.append(t)
+        return SimpleNamespace(history=lambda **kwargs: pd.DataFrame({"Close": [1.0, 2.0]}, index=pd.Index([0, 1])))
+    monkeypatch.setattr(monitor.yf, "Ticker", ticker)
+    assert monitor.main() == 1
+    assert calls.count("BTC-USD") == 3                                   # retried before giving up
+    assert not [t for t, _, _ in scenario.sent if t == "Monitor error"]  # one bad run does not page
+    assert json.loads(scenario.state.read_text())["glitch_runs"] == 1
+    assert monitor.main() == 1
+    pages = [m for t, m, _ in scenario.sent if t == "Monitor error"]
+    assert len(pages) == 1 and "without timestamps" in pages[0]          # the second bad run in a row pages
+
+
+def test_glitch_counter_resets_on_a_clean_run(scenario, monkeypatch):
+    state = json.loads(scenario.state.read_text()); state["glitch_runs"] = 1; scenario.state.write_text(json.dumps(state))
+    monitor.main()
+    assert json.loads(scenario.state.read_text())["glitch_runs"] == 0
