@@ -15,10 +15,85 @@ CANDLE_URL = ("https://www.okx.com/api/v5/market/history-candles"
               "?instId=BTC-USDT-SWAP&bar=1H&limit=100")
 PRICE_URL = "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
 BOOK_URL = "https://api.exchange.coinbase.com/products/BTC-USD/book?level=2"
+LIQUIDATION_URL = ("https://www.okx.com/api/v5/public/liquidation-orders"
+                   "?instType=SWAP&uly=BTC-USDT&state=filled&limit=100")
+INSTRUMENT_URL = ("https://www.okx.com/api/v5/public/instruments"
+                  "?instType=SWAP&instId=BTC-USDT-SWAP")
 LEVERAGE = ((10, .30), (25, .30), (50, .25), (100, .15))
 MMR, BUCKET = .005, 250
 METHOD = ("Estimate: OKX BTC-USDT perp open-interest build-up over the last ~4 days, "
           "split by taker side, assumed leverage mix 10x/25x/50x/100x.")
+
+
+def recent_summary(events, now_ms, ct_val):
+    """Summarize filled liquidation events over the trailing 24 hours."""
+    windows = (("m30", .5), ("h1", 1), ("h4", 4), ("h12", 12), ("h24", 24))
+    sums = {name: [0.0, 0.0] for name, _hours in windows}
+    hourly = [[0.0, 0.0] for _ in range(24)]   # rolling hours ending now, oldest first, so the strip covers the same 24h as h24
+    parsed = []
+    for event in events:
+        stamp = int(event["ts"])
+        side = event["posSide"]
+        if side not in ("long", "short"):
+            continue
+        usd = float(event["sz"]) * float(ct_val) * float(event["bkPx"])
+        side_index = 0 if side == "long" else 1
+        age_ms = now_ms - stamp
+        for name, hours in windows:
+            if 0 <= age_ms <= hours * 3_600_000:
+                sums[name][side_index] += usd
+        if 0 <= age_ms < 24 * 3_600_000:
+            hourly[23 - age_ms // 3_600_000][side_index] += usd
+        if 0 <= age_ms <= 24 * 3_600_000:
+            parsed.append((usd, stamp, side, float(event["bkPx"])))
+
+    def iso(stamp):
+        return datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    oldest = min((int(event["ts"]) for event in events), default=now_ms)
+    return {
+        "source": "OKX BTC-USDT perp, filled liquidation orders",
+        "covered_h": round(max(0, now_ms - oldest) / 3_600_000, 1),
+        "sums": {name: [int(round(value)) for value in amounts]
+                 for name, amounts in sums.items()},
+        "hourly": [[iso(now_ms - (24 - k) * 3_600_000), *(int(round(value)) for value in hourly[k])]
+                   for k in range(24)],
+        "biggest": [[iso(stamp), side, int(round(usd)), round(price, 1)]
+                    for usd, stamp, side, price in sorted(parsed, reverse=True)[:5]],
+    }
+
+
+def fetch_recent(fetch, now_ms, pause=time.sleep):
+    """Fetch and deduplicate up to 24 hours of filled OKX liquidations."""
+    instruments = source_data(fetch(INSTRUMENT_URL), True)
+    ct_val = float(instruments[0]["ctVal"])
+    if ct_val <= 0:
+        raise ValueError("invalid OKX contract value")
+    events, seen = [], set()
+    after = None
+    for page_number in range(40):
+        url = LIQUIDATION_URL + (("&after=%s" % after) if after is not None else "")
+        payload = fetch(url)
+        if not isinstance(payload, dict) or payload.get("code") != "0":
+            raise ValueError("OKX API error")
+        rows = payload.get("data") or []
+        details = [event for row in rows for event in row.get("details", [])]
+        new_count = 0
+        for event in details:
+            key = (event.get("ts"), event.get("sz"), event.get("bkPx"), event.get("posSide"))
+            if key not in seen:
+                seen.add(key)
+                events.append(event)
+                new_count += 1
+        if not details or not new_count:
+            break
+        oldest = min(int(event["ts"]) for event in details)
+        if oldest < now_ms - 24 * 3_600_000:
+            break
+        after = oldest
+        if page_number < 39:
+            pause(.2)
+    return recent_summary(events, now_ms, ct_val)
 
 
 def liquidation_model(oi_rows, taker_rows, candle_rows, price, bucket=BUCKET):
@@ -148,7 +223,7 @@ def main(fetch=None):
         try:
             values.append(source_data(fetch(url), okx))
         except Exception as exc:
-            print("%s failed: %s" % (name, str(exc).splitlines()[0] or type(exc).__name__))
+            print("%s failed: %s" % (name, (str(exc).splitlines() or [type(exc).__name__])[0]))
             return 0
     oi, taker, candles, ticker, book = values
     try:
@@ -156,22 +231,27 @@ def main(fetch=None):
         if price <= 0:
             raise ValueError("invalid price")
     except Exception as exc:
-        print("Coinbase price failed: %s" % (str(exc).splitlines()[0] or type(exc).__name__))
+        print("Coinbase price failed: %s" % ((str(exc).splitlines() or [type(exc).__name__])[0]))
         return 0
     try:
         model = liquidation_model(oi, taker, candles, price)
     except Exception as exc:
-        print("OKX hourly data failed: %s" % (str(exc).splitlines()[0] or type(exc).__name__))
+        print("OKX hourly data failed: %s" % ((str(exc).splitlines() or [type(exc).__name__])[0]))
         return 0
     try:
         summary = book_summary(book, price)
     except Exception as exc:
-        print("Coinbase order book failed: %s" % (str(exc).splitlines()[0] or type(exc).__name__))
+        print("Coinbase order book failed: %s" % ((str(exc).splitlines() or [type(exc).__name__])[0]))
         return 0
     report = dict(updated=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                   price=price, bucket=BUCKET, window_h=model["window_h"],
                   okx_oi_usd=model["okx_oi_usd"], levels=model["levels"],
                   near=model["near"], book=summary, method=METHOD)
+    try:
+        report["recent"] = fetch_recent(fetch, int(time.time() * 1000))
+    except Exception as exc:
+        print("OKX liquidation feed failed: %s" %
+              ((str(exc).splitlines() or [type(exc).__name__])[0]))
     save(report)
     return 0
 

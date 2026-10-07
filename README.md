@@ -37,3 +37,4 @@ Delivery retries three times; exhausted delivery failures are reported as block 
 Liquidity map:
 - `liquidity.py` runs about every 15 minutes while its loop run is active (`liquidity.yml`; a 20 minute cron only starts a new loop when none is running, and GitHub can delay or drop those starts) and writes `liquidity.json` with estimated nearby OKX BTC perpetual liquidation clusters
   and Coinbase order-book depth for the BTC Quantile Ladder site.
+  It also includes actual filled OKX BTC-USDT perpetual liquidations for recent windows from 30 minutes through 24 hours.
