@@ -1,20 +1,22 @@
 name: BTC Liquidity Map
 
+# One long run that rewrites liquidity.json about every 15 minutes, because GitHub starts crons 10 to 40 minutes late or drops
+# them (the first scheduled run of this job came 24 minutes late on 10/6). The 20 minute cron is only a starter, as in
+# mstr_loop.yml: a run exits at once when an older liquidity run is in progress, and a running loop hands over before every pass
+# if an older run has since started (a delayed queued run), so there is one writer. A loop that dies or reaches its budget is
+# replaced by the next starter that GitHub actually runs. No concurrency group: a pending slot there can cancel the successor.
 on:
   schedule:
-    - cron: '7,37 * * * *'
+    - cron: '*/20 * * * *'
   workflow_dispatch:
-
-concurrency:
-  group: btc-liquidity
-  cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 350           # GitHub's job limit is 360; the loop stops 330 minutes after it starts
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -26,27 +28,59 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run liquidity monitor
-        run: python liquidity.py
-
-      - name: Commit updated liquidity
-        # Same fetch/reset/restore/retry pattern as commit_state.sh, with only our file.
+      - name: Exit if an older loop is running
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          set -eu
-          if [ ! -f liquidity.json ]; then echo "run skipped; nothing to commit"; exit 0; fi
+          # Fail closed: if the API cannot be read, do not start a second writer; the next starter tries again.
+          if ids=$(gh run list --workflow liquidity.yml --status in_progress --limit 50 --json databaseId -q '.[].databaseId'); then
+            busy=no
+            for id in $ids; do [ "$id" -lt "${{ github.run_id }}" ] && busy=yes; done
+          else
+            busy=yes; echo "run list failed; not starting a loop"
+          fi
+          echo "older loop in progress: $busy"
+          echo "skip=$busy" >> "$GITHUB_OUTPUT"
+
+      - name: Liquidity loop
+        if: steps.gate.outputs.skip != 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -u
           git config user.name "btc-monitor"
           git config user.email "monitor@noreply"
-          KEEP=$(mktemp -d)
-          cp liquidity.json "$KEEP/"
-          for i in 1 2 3; do
-            git fetch -q origin main
-            git reset -q --hard origin/main
-            cp "$KEEP/liquidity.json" .
-            git add liquidity.json
-            if git diff --staged --quiet; then echo "nothing to commit"; exit 0; fi
-            git commit -q -m "liquidity: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            if git push -q origin HEAD:main; then echo "state pushed on try $i"; exit 0; fi
-            echo "push raced another run, retrying ($i of 3)"
+          # Same fetch/reset/restore/retry commit as commit_state.sh, with only our file. The reset also picks up code pushed
+          # to main since the last pass, so a liquidity.py fix takes effect on the next pass.
+          commit() {
+            [ -f liquidity.json ] || { echo "run skipped; nothing to commit"; return 0; }
+            KEEP=$(mktemp -d); cp liquidity.json "$KEEP/"
+            for i in 1 2 3; do
+              git fetch -q origin main
+              git reset -q --hard origin/main
+              cp "$KEEP/liquidity.json" .
+              git add liquidity.json
+              if git diff --staged --quiet; then echo "nothing to commit"; return 0; fi
+              git commit -q -m "liquidity: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              if git push -q origin HEAD:main; then echo "pushed on try $i"; return 0; fi
+              echo "push raced another run, retrying ($i of 3)"
+            done
+            echo "not pushed after 3 tries; the next pass tries again"
+          }
+          END=$(( $(date +%s) + 330 * 60 ))
+          older() {   # an older liquidity run in progress means a delayed queued run started after us: it keeps writing, we stop
+            ids=$(gh run list --workflow liquidity.yml --status in_progress --limit 50 --json databaseId -q '.[].databaseId') || return 1
+            for id in $ids; do [ "$id" -lt "${{ github.run_id }}" ] && return 0; done
+            return 1
+          }
+          while :; do
+            if older; then echo "an older loop is running; handing over"; break; fi
+            python liquidity.py || echo "liquidity.py exited $?"
+            commit
+            [ $(( $(date +%s) + 900 )) -lt "$END" ] || break
+            sleep 900
           done
-          echo "state not pushed after 3 tries"
-          exit 1
+          echo "time budget reached; the next starter takes over"
