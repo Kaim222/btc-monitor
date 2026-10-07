@@ -33,3 +33,7 @@ Files:
 The 60-bar trailing average (minimum 30), thresholds, slopes, cooldowns, and mute rules are unchanged.
 BTC's hourly change uses its own continuous series before joining market bars.
 Delivery retries three times; exhausted delivery failures are reported as block failures.
+
+Liquidity map:
+- `liquidity.py` runs every 30 minutes and writes `liquidity.json` with estimated nearby OKX BTC perpetual liquidation clusters
+  and Coinbase order-book depth for the BTC Quantile Ladder site.
