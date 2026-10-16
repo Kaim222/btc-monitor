@@ -842,7 +842,16 @@
     "regime": "above",
     "mstx": 15.49,
     "proj_mstx": 17.1,
-    "gap_mstx": -9.3
+    "gap_mstx": -9.3,
+    "mstr_30m": -1.11,
+    "btc_30m": -0.5,
+    "rel_30m": -0.61,
+    "mstx_30m": -2.44,
+    "mstr_60m": -2.69,
+    "btc_60m": -0.78,
+    "rel_60m": -1.91,
+    "mstx_60m": -5.75,
+    "scored": true
   },
   {
     "kind": "lag",
@@ -856,7 +865,16 @@
     "regime": "above",
     "mstx": 15.38,
     "proj_mstx": 17.05,
-    "gap_mstx": -9.66
+    "gap_mstx": -9.66,
+    "mstr_30m": -0.79,
+    "btc_30m": -0.43,
+    "rel_30m": -0.36,
+    "mstx_30m": -1.74,
+    "mstr_60m": -2.38,
+    "btc_60m": -0.71,
+    "rel_60m": -1.67,
+    "mstx_60m": -5.07,
+    "scored": true
   },
   {
     "kind": "watch",
