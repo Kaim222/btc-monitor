@@ -1118,7 +1118,16 @@
     "regime": "above",
     "mstx": 13.52,
     "proj_mstx": 16.22,
-    "gap_mstx": -16.01
+    "gap_mstx": -16.01,
+    "mstr_30m": 0.92,
+    "btc_30m": 0.79,
+    "rel_30m": 0.13,
+    "mstx_30m": 2.18,
+    "mstr_60m": 1.65,
+    "btc_60m": 0.84,
+    "rel_60m": 0.81,
+    "mstx_60m": 3.7,
+    "scored": true
   },
   {
     "kind": "watch",
@@ -1132,7 +1141,16 @@
     "regime": "above",
     "mstx": 13.49,
     "proj_mstx": 16.24,
-    "gap_mstx": -16.27
+    "gap_mstx": -16.27,
+    "mstr_30m": 1.12,
+    "btc_30m": 0.88,
+    "rel_30m": 0.24,
+    "mstx_30m": 2.59,
+    "mstr_60m": 1.71,
+    "btc_60m": 0.82,
+    "rel_60m": 0.89,
+    "mstx_60m": 3.85,
+    "scored": true
   },
   {
     "kind": "cheap",
