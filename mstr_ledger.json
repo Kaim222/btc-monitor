@@ -934,7 +934,16 @@
     "regime": "above",
     "mstx": 14.6,
     "proj_mstx": 16.59,
-    "gap_mstx": -11.7
+    "gap_mstx": -11.7,
+    "mstr_30m": -0.58,
+    "btc_30m": 0.24,
+    "rel_30m": -0.82,
+    "mstx_30m": -1.34,
+    "mstr_60m": -1.27,
+    "btc_60m": -0.03,
+    "rel_60m": -1.24,
+    "mstx_60m": -3.01,
+    "scored": true
   },
   {
     "kind": "cheap",
@@ -948,7 +957,16 @@
     "regime": "above",
     "mstx": 14.53,
     "proj_mstx": 16.58,
-    "gap_mstx": -11.83
+    "gap_mstx": -11.83,
+    "mstr_30m": -0.49,
+    "btc_30m": 0.28,
+    "rel_30m": -0.77,
+    "mstx_30m": -0.89,
+    "mstr_60m": -1.0,
+    "btc_60m": 0.05,
+    "rel_60m": -1.05,
+    "mstx_60m": -2.1,
+    "scored": true
   },
   {
     "kind": "lag",
