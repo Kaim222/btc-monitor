@@ -945,5 +945,19 @@
     "mstx": 14.42,
     "proj_mstx": 16.52,
     "gap_mstx": -12.45
+  },
+  {
+    "kind": "cheap",
+    "muted": false,
+    "time": "2026-10-16T12:02:00-04:00",
+    "mstr": 138.02,
+    "btc": 81218.94,
+    "proj": 147.51,
+    "gap": -6.47,
+    "lag": -1.72,
+    "regime": "above",
+    "mstx": 14.31,
+    "proj_mstx": 16.51,
+    "gap_mstx": -12.93
   }
 ]
