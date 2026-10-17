@@ -1,12 +1,12 @@
 {
-  "updated": "2026-10-16T20:27:14.705812+00:00",
-  "btc": 82131.46,
-  "as_of": "2026-10-15",
+  "updated": "2026-10-17T00:56:45.032463+00:00",
+  "btc": 81500.04,
+  "as_of": "2026-10-16",
   "flags": [
     {
       "id": "above50",
       "label": "BTC 30%+ over 50-day avg",
-      "value": "1.1%",
+      "value": "0.3%",
       "threshold": "30%",
       "on": false,
       "source": "Coinbase"
@@ -14,7 +14,7 @@
     {
       "id": "gain30",
       "label": "BTC up 50%+ in 30 days",
-      "value": "8.7%",
+      "value": "7.0%",
       "threshold": "50%",
       "on": false,
       "source": "Coinbase"
@@ -22,7 +22,7 @@
     {
       "id": "above20",
       "label": "BTC 20%+ over 20-day avg",
-      "value": "-1.9%",
+      "value": "-2.5%",
       "threshold": "20%",
       "on": false,
       "source": "Coinbase"
@@ -30,7 +30,7 @@
     {
       "id": "mayer",
       "label": "BTC 1.5x its 200-day avg",
-      "value": "1.14x",
+      "value": "1.13x",
       "threshold": "1.5x",
       "on": false,
       "source": "Coinbase"
@@ -38,7 +38,7 @@
     {
       "id": "funding",
       "label": "Funding 15%+/yr, OI beating BTC",
-      "value": "2.5%, OI -1.0%",
+      "value": "3.2%, OI -1.1%",
       "threshold": "15%, OI > BTC",
       "on": false,
       "source": "OKX / Coinbase"
@@ -46,7 +46,7 @@
     {
       "id": "cbprem",
       "label": "Coinbase discount, BTC rising",
-      "value": "-0.12%, +0.5%",
+      "value": "-0.14%, -1.3%",
       "threshold": "-0.10%, +3%",
       "on": false,
       "source": "Coinbase / OKX"
