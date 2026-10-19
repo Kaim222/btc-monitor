@@ -1210,7 +1210,16 @@
     "regime": "above",
     "mstx": 14.68,
     "proj_mstx": 16.53,
-    "gap_mstx": -12.02
+    "gap_mstx": -12.02,
+    "mstr_30m": -0.07,
+    "btc_30m": 0.14,
+    "rel_30m": -0.21,
+    "mstx_30m": -0.24,
+    "mstr_60m": -0.92,
+    "btc_60m": -0.22,
+    "rel_60m": -0.7,
+    "mstx_60m": -1.77,
+    "scored": true
   },
   {
     "kind": "cheap",
