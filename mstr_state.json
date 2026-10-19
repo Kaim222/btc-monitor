@@ -2,18 +2,20 @@
   "strategy_last": {
     "btc_held": 848517.0,
     "shares_m": 451.933,
-    "as_of": 1792432341359,
-    "fetched": "2026-10-19T13:52:30.654729-04:00"
+    "as_of": 1792432495261,
+    "fetched": "2026-10-19T13:55:00.593547-04:00"
   },
-  "last_run": "2026-10-19T13:52:30.468954-04:00",
-  "last_bar": "2026-10-19T13:52:00-04:00",
-  "mstr": 136.81,
-  "btc": 81743,
-  "strc": 98.89,
-  "gap": -7.48,
-  "lag": -0.1,
+  "last_run": "2026-10-19T13:55:00.430630-04:00",
+  "last_bar": "2026-10-19T13:54:00-04:00",
+  "mstr": 136.83,
+  "btc": 81782,
+  "strc": 98.9,
+  "gap": -7.55,
+  "lag": -0.14,
   "regime": "above",
-  "fired": [],
+  "fired": [
+    "cheap"
+  ],
   "inputs": "ladder site",
   "holdings": "strategy.com live",
   "btc_held": 848517.0,
@@ -22,9 +24,9 @@
   "band": "MSTR",
   "band_q": 12.7,
   "band_close": "2026-09-30",
-  "mstx": 13.99,
-  "proj_mstx": 16.29,
-  "gap_mstx": -14.96,
+  "mstx": 14.02,
+  "proj_mstx": 16.31,
+  "gap_mstx": -15.09,
   "band_changed": "2026-09-20T04:31:18.155008-04:00",
   "band_lines": "10 / 60 / 75",
   "premium_last": {
@@ -49,6 +51,6 @@
   "last_watch_row": "2026-10-16T14:56:00-04:00",
   "last_error_push": "2026-10-06T14:43:45.708607-04:00",
   "glitch_runs": 0,
-  "last_cheap_alert": "2026-10-19T12:54:00-04:00",
-  "last_cheap_gap": -0.14566005029485254
+  "last_cheap_alert": "2026-10-19T13:54:00-04:00",
+  "last_cheap_gap": -0.1509398558734755
 }
