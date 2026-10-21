@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-21T04:31:31.034982+00:00",
+  "updated": "2026-10-21T08:35:49.426053+00:00",
   "btc": 82938.26,
   "as_of": "2026-10-20",
   "flags": [
@@ -38,7 +38,7 @@
     {
       "id": "funding",
       "label": "Funding 15%+/yr, OI beating BTC",
-      "value": "6.4%, OI -1.9%",
+      "value": "6.4%, OI +0.4%",
       "threshold": "15%, OI > BTC",
       "on": false,
       "source": "OKX / Coinbase"
