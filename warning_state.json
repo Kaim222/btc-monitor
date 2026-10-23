@@ -4,7 +4,7 @@
   "above20": false,
   "mayer": false,
   "funding": false,
-  "cbprem": true,
+  "cbprem": false,
   "sth": null,
   "etf": null
 }
