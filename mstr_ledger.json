@@ -2130,7 +2130,16 @@
     "regime": "below",
     "mstx": 12.85,
     "proj_mstx": 12.16,
-    "gap_mstx": 5.44
+    "gap_mstx": 5.44,
+    "mstr_30m": -0.9,
+    "btc_30m": -0.2,
+    "rel_30m": -0.7,
+    "mstx_30m": -1.87,
+    "mstr_60m": -2.01,
+    "btc_60m": -0.27,
+    "rel_60m": -1.74,
+    "mstx_60m": -3.81,
+    "scored": true
   },
   {
     "kind": "watch",
