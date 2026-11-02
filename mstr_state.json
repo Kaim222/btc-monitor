@@ -2,20 +2,18 @@
   "strategy_last": {
     "btc_held": 849327.0,
     "shares_m": 453.112,
-    "as_of": 1793640741484,
-    "fetched": "2026-11-02T12:32:31.027591-05:00"
+    "as_of": 1793640895674,
+    "fetched": "2026-11-02T12:35:01.107231-05:00"
   },
-  "last_run": "2026-11-02T12:32:30.665789-05:00",
-  "last_bar": "2026-11-02T12:32:00-05:00",
-  "mstr": 133.23,
-  "btc": 76950,
+  "last_run": "2026-11-02T12:35:00.635528-05:00",
+  "last_bar": "2026-11-02T12:34:00-05:00",
+  "mstr": 133.19,
+  "btc": 76931,
   "strc": 99.86,
-  "gap": 2.77,
-  "lag": -0.57,
+  "gap": 2.78,
+  "lag": -0.54,
   "regime": "below",
-  "fired": [
-    "rich"
-  ],
+  "fired": [],
   "inputs": "ladder site",
   "holdings": "strategy.com live",
   "btc_held": 849327.0,
@@ -24,9 +22,9 @@
   "band": "MSTX",
   "band_q": 7.7,
   "band_close": "2026-10-31",
-  "mstx": 12.9,
-  "proj_mstx": 12.19,
-  "gap_mstx": 5.53,
+  "mstx": 12.88,
+  "proj_mstx": 12.18,
+  "gap_mstx": 5.56,
   "band_changed": "2026-11-01T02:20:23.148098-05:00",
   "band_lines": "10 / 60 / 75",
   "premium_last": {
