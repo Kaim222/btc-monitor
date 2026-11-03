@@ -2268,6 +2268,29 @@
     "regime": "below",
     "mstx": 13.45,
     "proj_mstx": 12.68,
-    "gap_mstx": 6.35
+    "gap_mstx": 6.35,
+    "mstr_30m": -0.01,
+    "btc_30m": 0.2,
+    "rel_30m": -0.21,
+    "mstx_30m": -0.0,
+    "mstr_60m": 0.14,
+    "btc_60m": 0.34,
+    "rel_60m": -0.2,
+    "mstx_60m": -0.19,
+    "scored": true
+  },
+  {
+    "kind": "rich",
+    "muted": false,
+    "time": "2026-11-03T12:49:00-05:00",
+    "mstr": 136.51,
+    "btc": 77666.79,
+    "proj": 132.86,
+    "gap": 2.7,
+    "lag": -0.33,
+    "regime": "below",
+    "mstx": 13.43,
+    "proj_mstx": 12.83,
+    "gap_mstx": 5.41
   }
 ]
