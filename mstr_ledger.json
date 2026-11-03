@@ -2222,7 +2222,16 @@
     "regime": "below",
     "mstx": 13.55,
     "proj_mstx": 12.74,
-    "gap_mstx": 6.55
+    "gap_mstx": 6.55,
+    "mstr_30m": 0.5,
+    "btc_30m": -0.02,
+    "rel_30m": 0.52,
+    "mstx_30m": 1.03,
+    "mstr_60m": -0.57,
+    "btc_60m": -0.2,
+    "rel_60m": -0.37,
+    "mstx_60m": -1.07,
+    "scored": true
   },
   {
     "kind": "rich",
