@@ -2370,5 +2370,19 @@
     "rel_60m": 0.68,
     "mstx_60m": 1.78,
     "scored": true
+  },
+  {
+    "kind": "rich",
+    "muted": false,
+    "time": "2026-11-04T13:34:00-05:00",
+    "mstr": 145.85,
+    "btc": 80482.09,
+    "proj": 142.75,
+    "gap": 2.16,
+    "lag": 0.39,
+    "regime": "below",
+    "mstx": 15.32,
+    "proj_mstx": 14.72,
+    "gap_mstx": 4.31
   }
 ]
