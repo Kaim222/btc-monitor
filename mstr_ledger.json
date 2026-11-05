@@ -2429,7 +2429,16 @@
     "regime": "below",
     "mstx": 12.63,
     "proj_mstx": 13.01,
-    "gap_mstx": -2.52
+    "gap_mstx": -2.52,
+    "mstr_30m": -2.21,
+    "btc_30m": -1.62,
+    "rel_30m": -0.59,
+    "mstx_30m": -4.43,
+    "mstr_60m": -3.75,
+    "btc_60m": -2.3,
+    "rel_60m": -1.45,
+    "mstx_60m": -7.84,
+    "scored": true
   },
   {
     "kind": "watch",
