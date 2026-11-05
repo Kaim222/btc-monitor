@@ -2462,5 +2462,19 @@
     "rel_60m": 1.88,
     "mstx_60m": 4.08,
     "scored": true
+  },
+  {
+    "kind": "watch",
+    "muted": false,
+    "time": "2026-11-05T12:04:00-05:00",
+    "mstr": 127.46,
+    "btc": 76104.9,
+    "proj": 129.15,
+    "gap": -1.3,
+    "lag": -1.16,
+    "regime": "below",
+    "mstx": 11.56,
+    "proj_mstx": 11.92,
+    "gap_mstx": -2.61
   }
 ]
