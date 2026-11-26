@@ -1,12 +1,12 @@
 {
-  "updated": "2026-11-26T04:23:02.100516+00:00",
+  "updated": "2026-11-26T08:24:32.996782+00:00",
   "btc": 60383.51,
   "as_of": "2026-11-25",
   "flags": [
     {
       "id": "above50",
       "label": "BTC 30%+ over 50-day avg",
-      "value": "-19.6%",
+      "value": "-19.5%",
       "threshold": "30%",
       "on": false,
       "source": "Coinbase"
@@ -22,7 +22,7 @@
     {
       "id": "above20",
       "label": "BTC 20%+ over 20-day avg",
-      "value": "-9.5%",
+      "value": "-9.2%",
       "threshold": "20%",
       "on": false,
       "source": "Coinbase"
@@ -38,7 +38,7 @@
     {
       "id": "funding",
       "label": "Funding 15%+/yr, OI beating BTC",
-      "value": "0.9%, OI -8.8%",
+      "value": "0.9%, OI -8.5%",
       "threshold": "15%, OI > BTC",
       "on": false,
       "source": "OKX / Coinbase"
